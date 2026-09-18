@@ -11,6 +11,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -18,7 +19,75 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
+
+
+# ---------------------------------------------------------------- CUDA 준비
+# GPU 로 인식하려면 cuBLAS 가 있어야 한다. 이게 없으면 윈도우가
+# "cublas64_12.dll 을 찾을 수 없습니다" 모달 창을 띄우고 프로그램이 멈춘다.
+# 그래서 (1) 그 창을 막고 (2) 있을 만한 자리를 검색 경로에 넣고
+# (3) 실제로 불러와 본 뒤에야 CUDA 를 시도한다.
+_cuda_note = None
+_cuda_ok = None
+
+
+def _suppress_dll_error_box():
+    SEM_FAILCRITICALERRORS = 0x0001
+    SEM_NOGPFAULTERRORBOX = 0x0002
+    try:
+        ctypes.windll.kernel32.SetErrorMode(
+            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)
+    except Exception:
+        pass
+
+
+def _cuda_dll_dirs():
+    """cuBLAS 가 있을 만한 자리들. 앞쪽이 우선."""
+    import glob
+    dirs = []
+    # 1) 이 프로그램 런타임에 pip 로 깔린 nvidia 패키지
+    for sp in sys.path:
+        if sp.endswith("site-packages"):
+            dirs += sorted(glob.glob(os.path.join(sp, "nvidia", "*", "bin")))
+    # 2) 시스템에 깔린 CUDA 툴킷
+    env = os.environ.get("CUDA_PATH")
+    if env:
+        dirs.append(os.path.join(env, "bin"))
+    dirs += sorted(glob.glob(
+        r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*\bin"),
+        reverse=True)
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def cuda_ready():
+    """(GPU 를 쓸 수 있나, 사람이 읽을 설명). 한 번만 살펴보고 기억한다."""
+    global _cuda_ok, _cuda_note
+    if _cuda_ok is not None:
+        return _cuda_ok, _cuda_note
+
+    _suppress_dll_error_box()
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() <= 0:
+            _cuda_ok, _cuda_note = False, "GPU 를 찾지 못했습니다 (CPU 로 씁니다)"
+            return _cuda_ok, _cuda_note
+    except Exception as e:
+        _cuda_ok, _cuda_note = False, "GPU 확인 실패: %s" % str(e)[:60]
+        return _cuda_ok, _cuda_note
+
+    for d in _cuda_dll_dirs():
+        try:
+            os.add_dll_directory(d)
+        except Exception:
+            pass
+    try:
+        ctypes.WinDLL("cublas64_12.dll")
+        _cuda_ok, _cuda_note = True, "GPU 사용 가능"
+    except OSError:
+        _cuda_ok = False
+        _cuda_note = ("GPU 가 있지만 cuBLAS 가 없어 CPU 로 씁니다. "
+                      "GPU로_바꾸기.bat (setup_gpu.bat) 을 한 번 실행하면 빨라집니다.")
+    return _cuda_ok, _cuda_note
 
 
 def find_cli():
@@ -329,12 +398,21 @@ class Engine:
             self.on_event("error",
                           "모델 %s 을 아직 받지 않았습니다. 창에서 내려받아 주세요." % name, {})
             return None
-        for device, compute in (("cuda", "int8_float16"), ("cpu", "int8")):
+        ok, note = cuda_ready()
+        if not ok:
+            self.on_event("info", note, {})
+        plans = ([("cuda", "int8_float16")] if ok else []) + [("cpu", "int8")]
+        for device, compute in plans:
             try:
                 self.model = WhisperModel(target, device=device, compute_type=compute)
                 self.s["model"] = name
                 self.on_event("info", "모델 %s / %s(%s) 준비 완료 · %s"
                               % (name, device, compute, where), {})
+                if device == "cpu" and name in ("medium", "large-v3",
+                                                "large-v3-turbo"):
+                    self.on_event("error",
+                                  "CPU 로 %s 를 돌리면 말보다 인식이 한참 늦습니다. "
+                                  "설정에서 small 로 바꾸시는 편이 낫습니다." % name, {})
                 return device
             except Exception as e:
                 self.on_event("info", "%s 사용 불가: %s"

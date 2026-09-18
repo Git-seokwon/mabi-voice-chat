@@ -24,10 +24,12 @@ FILES = [
     "models.py",
     "mabi_voice.pyw",
     "setup.bat",
+    "setup_gpu.bat",
     "실행.bat",
     "설치.bat",
     "콘솔로_실행.bat",
     "관리자로_실행.bat",
+    "GPU로_바꾸기.bat",
     "tools/voice_chat.py",
     "tools/stt_test.py",
 ]

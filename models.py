@@ -185,9 +185,10 @@ def download(name, on_progress=None, on_log=None):
 
 
 def cuda_available():
+    """드라이버만 있는 게 아니라 cuBLAS 까지 실제로 불러와지는지 본다."""
     try:
-        import ctranslate2
-        return ctranslate2.get_cuda_device_count() > 0
+        import core
+        return core.cuda_ready()[0]
     except Exception:
         return False
 
@@ -208,6 +209,7 @@ def recommend():
     """이 PC 에 맞는 모델 이름과 그 이유."""
     if not cuda_available():
         return "small", "GPU 가속을 쓸 수 없어 작은 모델을 권합니다"
+
     free = free_vram_mb()
     if free >= 3000:
         return "large-v3", "VRAM 여유 %dMB. 가장 정확한 모델을 쓸 수 있습니다" % free

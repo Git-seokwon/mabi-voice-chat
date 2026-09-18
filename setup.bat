@@ -36,10 +36,33 @@ echo [2/3] packages (this downloads a few hundred MB, please wait)
 if errorlevel 1 goto fail
 echo.
 
-echo [3/3] checking
+echo [3/4] checking
 "%PY%" -c "import tkinter, sounddevice, numpy, faster_whisper, pystray, PIL; print('all imports OK')"
 if errorlevel 1 goto fail
 echo ok> "%RT%\.deps-ok"
+echo.
+
+echo [4/4] GPU acceleration (optional)
+where nvidia-smi >nul 2>&1
+if errorlevel 1 (
+  echo       No NVIDIA GPU found. The program will use the CPU.
+  echo       On a CPU, pick the "small" model in the window.
+  goto done
+)
+echo       An NVIDIA GPU was found.
+echo       GPU makes recognition several times faster, but it needs
+echo       a 550 MB library that is not installed yet.
+choice /C YN /T 30 /D Y /M "Install it now (30s -> yes)"
+if errorlevel 2 (
+  echo       Skipped. You can run setup_gpu.bat later.
+  goto done
+)
+"%PY%" -m pip install nvidia-cublas-cu12
+if errorlevel 1 (
+  echo       GPU support failed. The program still works on the CPU.
+)
+
+:done
 echo.
 echo Setup finished. You can run the program now.
 exit /b 0
