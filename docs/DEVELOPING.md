@@ -22,6 +22,7 @@ tools/
   stt_test.py              마이크와 인식만 시험 (--list, --scan)
 docs/
   DEVELOPING.md            이 문서
+  images/                  README 에 넣는 스크린샷
 ```
 
 뿌리에는 **누르는 것(`실행.bat`)과 읽는 것(`README.md`, `LICENSE`)** 만 둔다.
@@ -154,6 +155,8 @@ PATH 는 프로그램이 시작할 때 물려받는다. 게임이 토글을 켜�
 판을 올릴 때 모델을 다시 받지 않게 하려고 `core.data_dir()` 을 뒀다.
 `MABI_DATA` → 프로그램 폴더에 이미 `models\` 나 `settings.json` 이 있으면 거기
 (예전부터 쓰던 사람 보호) → `%LOCALAPPDATA%\mabi-voice-chat` 순이다.
+모델만 다른 곳에 두려면 `MABI_MODELS` 를 쓴다. README 에는 이 표를 넣지 않았다.
+받아서 쓰는 사람에게는 "덮어쓰면 된다" 한 줄로 충분하다.
 
 ### 두 개가 동시에 돌지 못하게 막는다
 
