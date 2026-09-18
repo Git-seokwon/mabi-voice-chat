@@ -62,6 +62,28 @@ def parse_hotkey(spec):
     return mods, key
 
 
+# RegisterHotKey 용 모디파이어 비트. 이쪽은 운영체제가 조합을 먼저 가로채므로
+# 게임이 키를 삼켜도, 게임이 관리자 권한이어도 우리에게 전달된다.
+MOD_FLAGS = {"alt": 0x0001, "ctrl": 0x0002, "control": 0x0002,
+             "shift": 0x0004, "win": 0x0008}
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
+
+
+def hotkey_flags(spec):
+    """'win+f9' -> (0x0008, 0x78). 못 읽으면 (None, None)."""
+    parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
+    if not parts:
+        return None, None
+    vk = KEYS.get(parts[-1])
+    if vk is None:
+        return None, None
+    flags = 0
+    for p in parts[:-1]:
+        flags |= MOD_FLAGS.get(p, 0)
+    return flags, vk
+
+
 def valid_hotkey(spec):
     """'win+f9' 처럼 읽을 수 있는 조합인지. 모디파이어만 있으면 안 된다."""
     parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
@@ -359,11 +381,60 @@ class Engine:
                     break
                 time.sleep(1.2)
 
-    # --- 단축키 감시. 게임 창이 앞에 있어도 먹히게 키 상태를 직접 읽는다
+    # --- 단축키 감시
     def _watch_key(self):
+        """먼저 RegisterHotKey 로 등록해 본다. 실패하면 키 상태 읽기로 대신한다.
+
+        GetAsyncKeyState 로 읽는 방식은 게임이 관리자 권한으로 돌고 우리가
+        아니면 막힌다. RegisterHotKey 는 운영체제가 조합을 가로채서 우리
+        메시지 큐에 넣어 주므로 그 벽을 넘는다. Win 조합을 써도 시작 메뉴가
+        열리지 않는다 - 운영체제가 조합을 먹어 버리기 때문이다.
+        """
+        spec = self.s.get("hotkey", "win+f9")
+        if self._register_hotkey(spec):
+            return
+        self.on_event("info",
+                      "단축키 %s 등록 실패 (다른 프로그램이 이미 쓰는 조합일 수 있음). "
+                      "키 상태 읽기로 대신하지만, 게임이 관리자 권한이면 안 먹힙니다."
+                      % hotkey_label(spec), {})
+        self._poll_hotkey(spec)
+
+    def _register_hotkey(self, spec):
+        from ctypes import wintypes
+        u32 = ctypes.windll.user32
+        flags, vk = hotkey_flags(spec)
+        if vk is None:
+            return False
+        # RegisterHotKey 는 등록한 스레드의 큐로 WM_HOTKEY 를 보낸다.
+        # 그래서 등록과 메시지 받기를 같은 스레드에서 해야 한다.
+        if not u32.RegisterHotKey(None, 1, flags | MOD_NOREPEAT, vk):
+            return False
+        self.on_event("info", "단축키 %s 등록됨" % hotkey_label(spec), {})
+
+        class MSG(ctypes.Structure):
+            _fields_ = [("hwnd", wintypes.HWND), ("message", wintypes.UINT),
+                        ("wParam", wintypes.WPARAM), ("lParam", wintypes.LPARAM),
+                        ("time", wintypes.DWORD), ("pt_x", wintypes.LONG),
+                        ("pt_y", wintypes.LONG)]
+
+        msg = MSG()
+        try:
+            while not self.stop_flag.is_set():
+                # PeekMessage 로 받아야 stop_flag 를 확인할 틈이 생긴다
+                if u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
+                    if msg.message == WM_HOTKEY:
+                        self.set_listening(not self.listening)
+                else:
+                    time.sleep(0.03)
+        finally:
+            u32.UnregisterHotKey(None, 1)
+        return True
+
+    def _poll_hotkey(self, spec):
+        """예비 수단. 키 상태를 직접 읽는다."""
         u32 = ctypes.windll.user32
         gaks = u32.GetAsyncKeyState
-        mods, key = parse_hotkey(self.s.get("hotkey", "win+f9"))
+        mods, key = parse_hotkey(spec)
         uses_win = MODIFIERS["win"] in mods
         down = False
 
@@ -376,8 +447,6 @@ class Engine:
                 self.set_listening(not self.listening)
                 if uses_win:
                     # Win 을 떼는 순간 시작 메뉴가 열리는 걸 막는다.
-                    # Win 이 아직 눌린 동안 Ctrl 을 톡 쳐 주면 윈도우가
-                    # 이걸 조합키로 보고 시작 메뉴를 열지 않는다.
                     u32.keybd_event(VK_CONTROL, 0, 0, 0)
                     u32.keybd_event(VK_CONTROL, 0, 2, 0)
             down = now
