@@ -19,7 +19,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 
 # ---------------------------------------------------------------- CUDA 준비
