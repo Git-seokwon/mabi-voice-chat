@@ -282,6 +282,7 @@ class Engine:
         self.stream = None
         self.jobs = queue.Queue()
         self.stop_flag = threading.Event()
+        self.hotkey_restart = threading.Event()   # 단축키를 바꾸면 다시 등록한다
 
         self.noise = 0.005
         self.last_sent = ("", 0.0)
@@ -446,14 +447,23 @@ class Engine:
         메시지 큐에 넣어 주므로 그 벽을 넘는다. Win 조합을 써도 시작 메뉴가
         열리지 않는다 - 운영체제가 조합을 먹어 버리기 때문이다.
         """
-        spec = self.s.get("hotkey", "win+f9")
-        if self._register_hotkey(spec):
-            return
-        self.on_event("info",
-                      "단축키 %s 등록 실패 (다른 프로그램이 이미 쓰는 조합일 수 있음). "
-                      "키 상태 읽기로 대신하지만, 게임이 관리자 권한이면 안 먹힙니다."
-                      % hotkey_label(spec), {})
-        self._poll_hotkey(spec)
+        # 단축키를 바꾸면 다시 등록해야 하므로 통째로 되돌아오는 고리로 둔다.
+        while not self.stop_flag.is_set():
+            self.hotkey_restart.clear()
+            spec = self.s.get("hotkey", "win+f9")
+            if not self._register_hotkey(spec):
+                self.on_event(
+                    "info",
+                    "단축키 %s 등록 실패 (다른 프로그램이 이미 쓰는 조합일 수 있음). "
+                    "키 상태 읽기로 대신하지만, 게임이 관리자 권한이면 안 먹힙니다."
+                    % hotkey_label(spec), {})
+                self._poll_hotkey(spec)
+
+    def set_hotkey(self, spec):
+        """단축키를 즉시 갈아 끼운다. 감시 고리가 다시 등록한다."""
+        self.s["hotkey"] = spec
+        save_settings(self.s)
+        self.hotkey_restart.set()
 
     def _register_hotkey(self, spec):
         from ctypes import wintypes
@@ -475,8 +485,8 @@ class Engine:
 
         msg = MSG()
         try:
-            while not self.stop_flag.is_set():
-                # PeekMessage 로 받아야 stop_flag 를 확인할 틈이 생긴다
+            while not self.stop_flag.is_set() and not self.hotkey_restart.is_set():
+                # PeekMessage 로 받아야 중단 요청을 확인할 틈이 생긴다
                 if u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
                     if msg.message == WM_HOTKEY:
                         self.set_listening(not self.listening)
@@ -497,7 +507,7 @@ class Engine:
         def held(vks):
             return any(gaks(v) & 0x8000 for v in vks)
 
-        while not self.stop_flag.is_set():
+        while not self.stop_flag.is_set() and not self.hotkey_restart.is_set():
             now = bool(gaks(key) & 0x8000) and all(held(g) for g in mods)
             if now and not down:
                 self.set_listening(not self.listening)
