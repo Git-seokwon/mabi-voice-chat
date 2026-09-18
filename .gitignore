@@ -1,7 +1,11 @@
 __pycache__/
 *.pyc
+
+# 만들어지는 것
+runtime/
+models/
+dist/
+
+# 개인 것
 settings.json
 sent.log
-models/
-runtime/
-dist/

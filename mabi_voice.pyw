@@ -119,7 +119,7 @@ class App:
         self._cap_until = 0
 
         self.root = tk.Tk()
-        self.root.title("마비노기 음성 채팅")
+        self.root.title("마비노기 음성 채팅 %s" % core.VERSION)
         self.root.configure(bg=BG)
         self.root.geometry("580x660")
         self.root.minsize(520, 600)

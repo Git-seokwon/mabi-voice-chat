@@ -47,17 +47,21 @@ VRAM 여유가 3GB 이상이면 `large-v3`, 그 사이면 `large-v3-turbo` 다.
 GPU 가 없으면 큰 모델은 말보다 인식이 늦어 대화에 쓰기 어렵다. 그럴 때는
 `small` 로 내려야 한다.
 
-## 배포할 때
+## 배포본 만들기
 
-`runtime\` 과 `models\` 는 **넣지 않고** 보낸다. 받는 사람의 첫 실행에
-알맞은 것이 자동으로 들어간다. 그러면 보낼 파일은 스크립트 몇 개뿐이라
-아주 작다.
+```
+python build_dist.py
+```
 
-넣어 보낼 것: `*.py`, `mabi_voice.pyw`, `*.bat`, `requirements.txt`,
-`README.md`
+`dist\mabi-voice-chat-<판번호>.zip` 이 나온다. **30KB 남짓**이다.
+`runtime\` 과 `models\` 는 넣지 않기 때문이다. 받는 사람이 `실행.bat` 을
+누르면 자기 PC 에 맞는 것이 알아서 들어간다.
 
-빼고 보낼 것: `runtime\`, `models\`, `settings.json`, `sent.log`,
-`__pycache__\`
+들어가는 것은 `build_dist.py` 의 `FILES` 목록이 전부다. 개인 설정
+(`settings.json`), 보낸 말 기록(`sent.log`), `runtime\`, `models\` 는
+이름이 스치기만 해도 멈추도록 막아 두었다.
+
+판번호는 `core.py` 의 `VERSION` 한 곳에서 고친다.
 
 ## 쓰는 법
 
@@ -167,14 +171,32 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" 
 
 ## 구성
 
-| 파일 | 하는 일 |
+```
+mabi-voice-chat/
+├─ core.py              목소리 감지 · 인식 · 전송. UI 를 모른다
+├─ models.py            모델 목록 · 내려받기 · 위치 관리
+├─ mabi_voice.pyw       창과 트레이
+├─ build_dist.py        배포용 zip 만들기
+├─ requirements.txt
+├─ setup.bat            파이썬과 패키지를 runtime\ 에 들인다
+├─ 실행.bat             이걸 누른다 (콘솔 없이)
+├─ 설치.bat             setup.bat 을 부르는 껍데기
+├─ 콘솔로_실행.bat      오류를 볼 때
+├─ 관리자로_실행.bat    단축키가 끝까지 안 먹힐 때
+└─ tools/
+   ├─ voice_chat.py     같은 엔진의 콘솔판
+   └─ stt_test.py       마이크·인식만 시험 (--list, --scan)
+```
+
+만들어지는 것 (모두 저장소에 올리지 않는다)
+
+| 이름 | 무엇 |
 |---|---|
-| `core.py` | 목소리 감지 · 인식 · 전송. UI 를 모른다 |
-| `mabi_voice.pyw` | 창과 트레이 |
-| `voice_chat.py` | 같은 엔진의 콘솔판 |
-| `stt_test.py` | 마이크·인식만 시험하는 도구 (`--list`, `--scan`) |
-| `models.py` | 모델 목록·내려받기·위치 관리 |
-| `setup.bat` | 파이썬과 패키지를 `runtime\` 에 들인다 |
+| `runtime\` | 전용 파이썬과 패키지. 약 440MB |
+| `models\` | 받아 둔 음성 인식 모델 |
+| `settings.json` | 내 설정 |
+| `sent.log` | 보낸 말 기록 |
+| `dist\` | 배포용 zip |
 
 ## 쓰는 모델
 

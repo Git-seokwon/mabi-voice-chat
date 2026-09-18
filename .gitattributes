@@ -1,0 +1,4 @@
+# 줄바꿈: 소스는 LF, 배치 파일은 윈도우가 읽으므로 CRLF
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary

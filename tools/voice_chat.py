@@ -5,13 +5,13 @@
     python voice_chat.py --dev 28     # 마이크 지정
     python voice_chat.py --dry        # 보내지 않고 인식만
 
-창과 트레이가 있는 쪽은 mabi_voice.pyw (실행.bat) 이다.
+창과 트레이가 있는 쪽은 상위 폴더의 mabi_voice.pyw (실행.bat) 이다.
 """
 import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core
 
@@ -42,6 +42,16 @@ def show(kind, text, meta):
 
 def main():
     args = sys.argv[1:]
+    # 모르는 인자를 줬을 때 그냥 듣기 시작하면 위험하다. 설명만 찍고 끝낸다.
+    if {"-h", "--help", "/?"} & set(args):
+        print(__doc__)
+        return
+    unknown = [a for a in args if a.startswith("-") and a not in ("--dev", "--dry")]
+    if unknown:
+        print("모르는 옵션: %s" % " ".join(unknown))
+        print(__doc__)
+        return
+
     s = core.load_settings()
     if "--dev" in args:
         s["device"] = int(args[args.index("--dev") + 1])

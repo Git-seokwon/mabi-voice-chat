@@ -18,6 +18,8 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
+VERSION = "1.0.0"
+
 
 def find_cli():
     """게임 CLI 위치. PATH 에 등록되어 있으면 그걸 쓰고, 없으면 흔한 자리를 본다.
