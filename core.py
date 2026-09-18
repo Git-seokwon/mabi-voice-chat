@@ -27,7 +27,56 @@ MIN_SEC = 0.4                 # 이보다 짧으면 기침·잡음으로 보고 
 MAX_SEC = 15.0                # 이보다 길면 잘라서 넘김
 PRE_ROLL = 6                  # 말 시작 직전 프레임도 함께 (첫 음절 보존)
 
-VK_TOGGLE = 0x78              # F9
+# --- 전역 단축키 ---
+# GetAsyncKeyState 로 키 상태를 직접 읽는다. 창 포커스와 무관하므로
+# 다른 게임이 앞에 있어도 먹힌다.
+VK_CONTROL, VK_SHIFT, VK_MENU = 0x11, 0x10, 0x12
+VK_LWIN, VK_RWIN = 0x5B, 0x5C
+
+# 이름 -> 가상키. 한 모디파이어에 좌우 두 키가 있으면 둘 다 인정한다.
+MODIFIERS = {
+    "win": (VK_LWIN, VK_RWIN),
+    "ctrl": (VK_CONTROL,),
+    "control": (VK_CONTROL,),
+    "shift": (VK_SHIFT,),
+    "alt": (VK_MENU,),
+}
+KEYS = {"f%d" % i: 0x6F + i for i in range(1, 13)}          # F1..F12
+KEYS.update({chr(c).lower(): c for c in range(0x41, 0x5B)})  # A..Z
+KEYS.update({str(d): 0x30 + d for d in range(10)})           # 0..9
+KEYS["space"] = 0x20
+KEYS["insert"] = 0x2D
+KEYS["scrolllock"] = 0x91
+KEYS["pause"] = 0x13
+
+
+def parse_hotkey(spec):
+    """'win+f9' -> ([(0x5B,0x5C)], 0x78). 못 읽으면 win+f9 로 돌아간다."""
+    parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
+    if not parts:
+        return [MODIFIERS["win"]], KEYS["f9"]
+    key = KEYS.get(parts[-1])
+    mods = [MODIFIERS[p] for p in parts[:-1] if p in MODIFIERS]
+    if key is None:
+        return [MODIFIERS["win"]], KEYS["f9"]
+    return mods, key
+
+
+def valid_hotkey(spec):
+    """'win+f9' 처럼 읽을 수 있는 조합인지. 모디파이어만 있으면 안 된다."""
+    parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
+    if not parts or parts[-1] not in KEYS:
+        return False
+    return all(p in MODIFIERS for p in parts[:-1])
+
+
+def hotkey_label(spec):
+    if not valid_hotkey(spec):
+        return "Win+F9"
+    names = {"win": "Win", "ctrl": "Ctrl", "control": "Ctrl",
+             "shift": "Shift", "alt": "Alt"}
+    parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
+    return "+".join(names.get(p, p.upper()) for p in parts) or "Win+F9"
 
 # 위스퍼가 무음·잡음에 붙이는 흔한 헛문장들. 이런 건 보내지 않는다.
 HALLUCINATIONS = (
@@ -44,6 +93,9 @@ DEFAULTS = {
     "noise_mult": 3.0,        # 주변 소음의 몇 배를 말소리로 볼지
     "hang_sec": 0.8,          # 이만큼 조용하면 말이 끝난 것으로 본다
     "log_to_file": True,
+    "hotkey": "win+f9",       # 듣기 켜고 끄기. 창 포커스와 무관하게 먹힌다
+    "overlay": True,          # 창을 내리면 작은 표시창을 띄운다
+    "overlay_pos": None,      # [x, y]. 끌어서 옮긴 자리를 기억한다
 }
 
 
@@ -307,16 +359,29 @@ class Engine:
                     break
                 time.sleep(1.2)
 
-    # --- F9 감시. 게임 창이 앞에 있어도 먹히게 키 상태를 직접 읽는다
+    # --- 단축키 감시. 게임 창이 앞에 있어도 먹히게 키 상태를 직접 읽는다
     def _watch_key(self):
-        gaks = ctypes.windll.user32.GetAsyncKeyState
+        u32 = ctypes.windll.user32
+        gaks = u32.GetAsyncKeyState
+        mods, key = parse_hotkey(self.s.get("hotkey", "win+f9"))
+        uses_win = MODIFIERS["win"] in mods
         down = False
+
+        def held(vks):
+            return any(gaks(v) & 0x8000 for v in vks)
+
         while not self.stop_flag.is_set():
-            now = bool(gaks(VK_TOGGLE) & 0x8000)
+            now = bool(gaks(key) & 0x8000) and all(held(g) for g in mods)
             if now and not down:
                 self.set_listening(not self.listening)
+                if uses_win:
+                    # Win 을 떼는 순간 시작 메뉴가 열리는 걸 막는다.
+                    # Win 이 아직 눌린 동안 Ctrl 을 톡 쳐 주면 윈도우가
+                    # 이걸 조합키로 보고 시작 메뉴를 열지 않는다.
+                    u32.keybd_event(VK_CONTROL, 0, 0, 0)
+                    u32.keybd_event(VK_CONTROL, 0, 2, 0)
             down = now
-            time.sleep(0.04)
+            time.sleep(0.03)
 
     def set_listening(self, on):
         self.listening = bool(on)

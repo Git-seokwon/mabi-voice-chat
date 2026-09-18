@@ -31,6 +31,8 @@ class App:
         self.level = 0.0
         self.tray = None
         self.engine = None
+        self.overlay = None
+        self._hiding = False        # withdraw 가 스스로 Unmap 을 부르는 걸 걸러낸다
 
         self.root = tk.Tk()
         self.root.title("마비노기 음성 채팅")
@@ -38,6 +40,8 @@ class App:
         self.root.geometry("560x520")
         self.root.minsize(480, 420)
         self.root.protocol("WM_DELETE_WINDOW", self.hide)
+        # 최소화도 닫기와 같게 다룬다. 작업표시줄에 남기지 않고 오버레이로 보낸다.
+        self.root.bind("<Unmap>", self._on_unmap)
 
         self._build()
         self.root.after(50, self._drain)
@@ -139,12 +143,31 @@ class App:
                            activebackground=ACCENT, length=180)
         self.hs.set(float(self.s.get("hang_sec", 0.8)))
         self.hs.grid(row=3, column=2, columnspan=4, sticky="we", padx=(8, 0))
+
+        tk.Label(cfg, text="단축키", bg=BG, fg=SUB,
+                 font=("Malgun Gothic", 9)).grid(row=4, column=0, sticky="w",
+                                                 pady=(6, 0))
+        self.hk_var = tk.StringVar(value=self.s.get("hotkey", "win+f9"))
+        hk = tk.Entry(cfg, textvariable=self.hk_var, width=12, bg=PANEL, fg=FG,
+                      relief="flat", insertbackground=FG,
+                      font=("Malgun Gothic", 9))
+        hk.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+        hk.bind("<Return>", self.change_hotkey)
+        hk.bind("<FocusOut>", self.change_hotkey)
+
+        self.ov_var = tk.BooleanVar(value=bool(self.s.get("overlay", True)))
+        tk.Checkbutton(cfg, text="내렸을 때 작은 표시창 보이기", variable=self.ov_var,
+                       command=self.change_overlay, bg=BG, fg=FG, selectcolor=PANEL,
+                       activebackground=BG, activeforeground=FG, bd=0,
+                       highlightthickness=0, font=("Malgun Gothic", 9)
+                       ).grid(row=4, column=2, columnspan=3, sticky="w",
+                              padx=(8, 0), pady=(6, 0))
         cfg.columnconfigure(3, weight=1)
 
         foot = tk.Frame(self.root, bg=BG)
         foot.pack(fill="x", pady=(2, 12), **pad)
-        tk.Label(foot, text="창을 닫으면 트레이로 내려갑니다", bg=BG, fg=SUB,
-                 font=("Malgun Gothic", 8)).pack(side="left")
+        tk.Label(foot, text="창을 닫거나 최소화하면 작은 표시창으로 내려갑니다",
+                 bg=BG, fg=SUB, font=("Malgun Gothic", 8)).pack(side="left")
         tk.Button(foot, text="종료", command=self.quit, bg=PANEL, fg=SUB,
                   relief="flat", bd=0, activebackground="#333644",
                   font=("Malgun Gothic", 9), padx=10, pady=3,
@@ -225,22 +248,27 @@ class App:
 
     def _paint_state(self, on):
         on = bool(on)
+        key = core.hotkey_label(self.s.get("hotkey", "win+f9"))
         self.dot.config(fg=ACCENT if on else SUB)
         self.state_lbl.config(text="듣고 있습니다" if on else "듣기 꺼짐")
-        self.toggle_btn.config(text="듣기 끄기 (F9)" if on else "듣기 켜기 (F9)")
+        self.toggle_btn.config(text="듣기 %s (%s)" % ("끄기" if on else "켜기", key))
+        self._overlay_paint(on)
         if self.tray:
             self.tray.icon = make_icon(on)
             self.tray.title = "마비노기 음성 채팅 — %s" % ("듣는 중" if on else "꺼짐")
 
     def _tick_level(self):
-        w = max(1, self.meter.winfo_width())
         # rms 는 아주 작은 값이라 눈에 보이게 늘린다
         frac = min(1.0, self.level * 12)
-        self.meter.coords(self.bar, 0, 0, int(w * frac), 10)
-        if self.engine:
-            t = max(self.engine.noise * float(self.s["noise_mult"]), 0.012)
-            self.meter.coords(self.thr, int(w * min(1.0, t * 12)), 0,
-                              int(w * min(1.0, t * 12)), 10)
+        if self.root.state() != "withdrawn":
+            w = max(1, self.meter.winfo_width())
+            self.meter.coords(self.bar, 0, 0, int(w * frac), 10)
+            if self.engine:
+                t = max(self.engine.noise * float(self.s["noise_mult"]), 0.012)
+                x = int(w * min(1.0, t * 12))
+                self.meter.coords(self.thr, x, 0, x, 10)
+        elif self.overlay is not None and self.overlay.winfo_viewable():
+            self.o_meter.coords(self.o_bar, 0, 0, int(44 * frac), 6)
         self.level *= 0.82
         self.root.after(60, self._tick_level)
 
@@ -277,6 +305,102 @@ class App:
         self._labels()
         core.save_settings(self.s)
 
+    def change_hotkey(self, _=None):
+        spec = self.hk_var.get().strip().lower() or "win+f9"
+        if not core.valid_hotkey(spec):
+            self.events.put(("error", "단축키를 읽지 못해 win+f9 로 둡니다: %s" % spec, {}))
+            spec = "win+f9"
+            self.hk_var.set(spec)
+        if spec == self.s.get("hotkey"):
+            return
+        self.s["hotkey"] = spec
+        core.save_settings(self.s)
+        self.events.put(("info", "단축키를 %s 로 바꿨습니다. 다음 실행부터 적용됩니다."
+                         % core.hotkey_label(spec), {}))
+        self._paint_state(self.engine.listening if self.engine else True)
+
+    def change_overlay(self):
+        self.s["overlay"] = bool(self.ov_var.get())
+        core.save_settings(self.s)
+        if not self.s["overlay"]:
+            self._overlay_show(False)
+
+    # ------------------------------------------------------------ 오버레이
+    def _build_overlay(self):
+        """디스코드 오버레이처럼, 항상 위에 떠 있는 작은 표시창."""
+        o = tk.Toplevel(self.root)
+        o.overrideredirect(True)                 # 제목줄 없는 납작한 창
+        o.attributes("-topmost", True)
+        o.attributes("-alpha", 0.88)
+        o.configure(bg="#14151a")
+        o.withdraw()
+
+        wrap = tk.Frame(o, bg="#14151a", padx=9, pady=5,
+                        highlightbackground="#3a3d4a", highlightthickness=1)
+        wrap.pack()
+
+        self.o_dot = tk.Label(wrap, text="●", bg="#14151a", fg=ACCENT,
+                              font=("Segoe UI", 11))
+        self.o_dot.pack(side="left")
+        self.o_txt = tk.Label(wrap, text="듣는 중", bg="#14151a", fg=FG,
+                              font=("Malgun Gothic", 9, "bold"))
+        self.o_txt.pack(side="left", padx=(5, 7))
+        self.o_meter = tk.Canvas(wrap, width=44, height=6, bg="#272935",
+                                 highlightthickness=0)
+        self.o_meter.pack(side="left")
+        self.o_bar = self.o_meter.create_rectangle(0, 0, 0, 6, fill=ACCENT, width=0)
+
+        # 끌어서 옮기기
+        def press(e):
+            o._dx, o._dy = e.x_root - o.winfo_x(), e.y_root - o.winfo_y()
+            o._moved = False
+
+        def drag(e):
+            o._moved = True
+            o.geometry("+%d+%d" % (e.x_root - o._dx, e.y_root - o._dy))
+
+        def release(e):
+            if getattr(o, "_moved", False):
+                self.s["overlay_pos"] = [o.winfo_x(), o.winfo_y()]
+                core.save_settings(self.s)
+            else:
+                self.show()                       # 끌지 않고 딸깍 -> 창 열기
+
+        for w in (o, wrap, self.o_dot, self.o_txt, self.o_meter):
+            w.bind("<Button-1>", press)
+            w.bind("<B1-Motion>", drag)
+            w.bind("<ButtonRelease-1>", release)
+            w.bind("<Button-3>", lambda e: self.toggle())   # 오른쪽 클릭 -> 켜고 끄기
+
+        self.overlay = o
+        o.update_idletasks()
+        pos = self.s.get("overlay_pos")
+        if pos:
+            o.geometry("+%d+%d" % (pos[0], pos[1]))
+        else:                                     # 처음엔 오른쪽 아래
+            sw, sh = o.winfo_screenwidth(), o.winfo_screenheight()
+            o.geometry("+%d+%d" % (sw - o.winfo_width() - 24, sh - 110))
+
+    def _overlay_show(self, on=True):
+        if not self.s.get("overlay", True):
+            return
+        if self.overlay is None:
+            self._build_overlay()
+        if on:
+            self.overlay.deiconify()
+            self.overlay.attributes("-topmost", True)
+        else:
+            self.overlay.withdraw()
+
+    def _overlay_paint(self, listening):
+        if self.overlay is None:
+            return
+        col = ACCENT if listening else SUB
+        self.o_dot.config(fg=col)
+        self.o_txt.config(text="듣는 중" if listening else "꺼짐",
+                          fg=FG if listening else SUB)
+        self.o_meter.itemconfig(self.o_bar, fill=col)
+
     # ------------------------------------------------------------ 트레이
     def _start_tray(self):
         try:
@@ -304,10 +428,21 @@ class App:
                                  "마비노기 음성 채팅", menu)
         threading.Thread(target=self.tray.run, daemon=True).start()
 
+    def _on_unmap(self, event):
+        if event.widget is not self.root or self._hiding:
+            return
+        if self.root.state() == "iconic":          # 최소화 버튼을 누른 경우
+            self.hide()
+
     def hide(self):
+        self._hiding = True
         self.root.withdraw()
+        self._hiding = False
+        self._overlay_show(True)
+        self._overlay_paint(self.engine.listening if self.engine else True)
 
     def show(self):
+        self._overlay_show(False)
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
