@@ -108,9 +108,12 @@ def remote_size_mb(name):
 
 
 def _tqdm_class(report):
-    """허깅페이스가 만드는 진행 표시기를 가로채 바이트 수를 모아 알린다.
+    """허깅페이스가 만드는 진행 표시기를 가로채 진행량을 알린다.
 
-    파일을 여러 개 동시에 받으므로 살아 있는 표시기 전부를 더해야 한다.
+    더하지 않고 '가장 많이 간 것' 을 쓴다. 허깅페이스는 바이트를 세는
+    표시기를 두 개 만든다 - 받는 단계(Downloading bytes)와 파일을 다시
+    맞추는 단계(Reconstructing) 다. 둘 다 전체 크기까지 차오르므로
+    더하면 200% 가 된다. 실제로 그렇게 보였다.
     """
     from tqdm.auto import tqdm as base
 
@@ -141,8 +144,8 @@ def _tqdm_class(report):
 
         def _report(self):
             with lock:
-                done = sum(t._done for t in live)
-                total = sum(t._total for t in live)
+                done = max([t._done for t in live] or [0])
+                total = max([t._total for t in live] or [0])
             try:
                 report(done, total)
             except Exception:
@@ -167,7 +170,8 @@ def download(name, on_progress=None, on_log=None):
 
     def report(done_bytes, _unused_total):
         if on_progress:
-            on_progress(done_bytes / 1e6, total_mb)
+            # 서버가 말한 크기를 넘길 일은 없어야 하지만, 넘으면 깎는다
+            on_progress(min(done_bytes / 1e6, total_mb), total_mb)
 
     log("%s 내려받기 시작 (%.0f MB)" % (name, total_mb))
     snapshot_download(

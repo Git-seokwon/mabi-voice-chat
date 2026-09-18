@@ -664,9 +664,11 @@ class App:
         self.root.after(0, self._dl_done, name, True)
 
     def _dl_paint(self, done, total):
-        frac = (done / total) if total else 0
+        frac = min(1.0, (done / total) if total else 0)
         self.dl.paint(frac, None, MINT)
-        self.dl_lbl.config(text="%.0f / %.0f MB   %.0f%%" % (done, total, frac * 100))
+        tail = "   받은 파일을 맞추는 중" if frac >= 0.999 else ""
+        self.dl_lbl.config(text="%.0f / %.0f MB   %.0f%%%s"
+                           % (min(done, total), total, frac * 100, tail))
 
     def _dl_done(self, name, ok):
         self._dl_show(False)
