@@ -10,8 +10,8 @@ import os
 import sys
 import zipfile
 
-APP = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, APP)
+APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(APP, "src"))
 import core
 
 NAME = "mabi-voice-chat"
@@ -19,18 +19,18 @@ NAME = "mabi-voice-chat"
 # 배포본에 들어갈 것. 여기 없는 것은 안 들어간다.
 FILES = [
     "README.md",
-    "DEVELOPING.md",
+    "docs/DEVELOPING.md",
     "requirements.txt",
-    "core.py",
-    "models.py",
-    "mabi_voice.pyw",
-    "setup.bat",
-    "setup_gpu.bat",
     "실행.bat",
-    "설치.bat",
-    "콘솔로_실행.bat",
-    "관리자로_실행.bat",
-    "GPU로_바꾸기.bat",
+    "src/core.py",
+    "src/models.py",
+    "src/mabi_voice.pyw",
+    "scripts/setup.bat",
+    "scripts/setup_gpu.bat",
+    "scripts/설치.bat",
+    "scripts/콘솔로_실행.bat",
+    "scripts/관리자로_실행.bat",
+    "scripts/GPU로_바꾸기.bat",
     "tools/voice_chat.py",
     "tools/stt_test.py",
 ]

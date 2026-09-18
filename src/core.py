@@ -19,7 +19,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 
 # ---------------------------------------------------------------- CUDA 준비
@@ -367,7 +367,8 @@ HALLUCINATIONS = (
     "MBC 뉴스", "KBS", "한글자막", "본 영상은", "다음 영상에서",
 )
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# core.py 는 src\ 안에 있다. 프로그램 뿌리는 그 부모다.
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def data_dir():

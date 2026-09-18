@@ -1,18 +1,32 @@
 # 만드는 사람용
 
-쓰는 법은 [README.md](README.md) 에 있다. 이 문서는 고치고 배포하는 쪽이다.
+쓰는 법은 [../README.md](../README.md) 에 있다. 이 문서는 고치고 배포하는 쪽이다.
 
 ## 구성
 
 ```
-core.py           목소리 감지 · 인식 · 전송. UI 를 모른다
-models.py         모델 목록 · 내려받기 · 위치 관리
-mabi_voice.pyw    창과 트레이. core 를 콜백으로만 부린다
-build_dist.py     배포용 zip 만들기
+실행.bat                    사용자가 누르는 단 하나의 파일
+README.md  LICENSE  requirements.txt
+
+src/
+  core.py                  목소리 감지 · 인식 · 전송. UI 를 모른다
+  models.py                모델 목록 · 내려받기 · 위치 관리
+  mabi_voice.pyw           창과 트레이. core 를 콜백으로만 부린다
+scripts/
+  setup.bat                파이썬과 꾸러미를 runtime\ 에 들인다
+  setup_gpu.bat            GPU 가속 라이브러리(550MB)
+  build_dist.py            배포용 zip 만들기
+  설치.bat / 콘솔로_실행.bat / 관리자로_실행.bat / GPU로_바꾸기.bat
 tools/
-  voice_chat.py   같은 엔진의 콘솔판
-  stt_test.py     마이크와 인식만 시험 (--list, --scan)
+  voice_chat.py            같은 엔진의 콘솔판
+  stt_test.py              마이크와 인식만 시험 (--list, --scan)
+docs/
+  DEVELOPING.md            이 문서
 ```
+
+뿌리에는 **누르는 것(`실행.bat`)과 읽는 것(`README.md`, `LICENSE`)** 만 둔다.
+나머지는 갈래별로 넣었다. `src\` 의 모듈은 자기 부모를 프로그램 뿌리로 본다
+(`APP_DIR`). 모델과 설정의 자리를 정할 때 그 값을 쓴다.
 
 `core.Engine` 은 화면에 직접 찍지 않는다. `on_event(kind, text, meta)` 와
 `on_level(rms)` 로만 바깥에 알린다. `kind` 는 `info` `sent` `dropped`
@@ -21,17 +35,17 @@ tools/
 ## 개발 중 실행
 
 ```
-python mabi_voice.pyw          # 패키지가 깔린 파이썬으로
-콘솔로_실행.bat                # 배포용 런타임으로, 오류를 보면서
+python src\mabi_voice.pyw        # 꾸러미가 깔린 파이썬으로
+scripts\콘솔로_실행.bat          # 배포용 런타임으로, 오류를 보면서
 ```
 
-`tools/stt_test.py --scan` 은 마이크가 여러 개일 때 어느 장치에 소리가
+`python tools\stt_test.py --scan` 은 마이크가 여러 개일 때 어느 장치에 소리가
 들어오는지 하나씩 들어 본다. 마이크가 의심될 때 먼저 돌린다.
 
 ## 배포본 만들기
 
 ```
-python build_dist.py
+python scriptsuild_dist.py
 ```
 
 `dist\mabi-voice-chat-<판번호>.zip` 이 나온다. 40KB 안쪽이다. 무거운 것
@@ -42,7 +56,7 @@ python build_dist.py
   스치기만 해도 멈춘다. 개인 설정이 딸려 나가는 것을 코드로 막는다.
 - 압축 **안쪽** 폴더 이름에는 판번호가 없다(`mabi-voice-chat`). 그래야 옛
   폴더에 그대로 덮어쓸 수 있다. 판번호는 압축 파일 이름에만 붙는다.
-- 판번호는 `core.py` 의 `VERSION` 한 곳에서 고친다.
+- 판번호는 `src\core.py` 의 `VERSION` 한 곳에서 고친다.
 
 ## 왜 이렇게 만들었나
 
@@ -63,8 +77,8 @@ cmd 는 `.bat` 을 OEM 코드페이지(한국어 윈도우면 CP949)로 읽는�
 한글 주석이 뭉개지면서 그 바이트 안에 `&` 가 생겨, 주석 뒷부분이 명령으로
 실행된 일이 있다. 파일 **이름**의 한글은 문제없다.
 
-그래서 실제 내용이 있는 스크립트는 ASCII 이름으로 두고(`setup.bat`,
-`setup_gpu.bat`), 한글 이름 파일은 그것을 부르는 한 줄 껍데기로 만들었다.
+그래서 실제 내용이 있는 스크립트는 ASCII 이름으로 두고(`scripts\setup.bat`,
+`scripts\setup_gpu.bat`), 한글 이름 파일은 그것을 부르는 한 줄 껍데기로 만들었다.
 
 ### GPU 는 cuBLAS 가 있어야 쓴다
 
@@ -96,7 +110,7 @@ PC 에는 이미 있지만 대부분은 없다. 없는 상태로 GPU 를 시도�
 같은 고리 안에 있고, `PeekMessage` 로 받아 중단 요청을 확인할 틈을 남긴다.
 
 등록이 실패하면(다른 프로그램이 같은 조합을 이미 쓰는 경우)에만 키 상태 읽기로
-내려간다. 그래도 안 되면 `관리자로_실행.bat` 이 마지막 수단이다.
+내려간다. 그래도 안 되면 `scripts\관리자로_실행.bat` 이 마지막 수단이다.
 
 ### 게임 CLI 는 PATH 만 믿지 않는다
 

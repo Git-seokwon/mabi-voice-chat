@@ -3,7 +3,7 @@ rem First-run setup: bring in a private Python and install the packages.
 rem The official "embeddable" Python has no tkinter, so this uses the
 rem python-build-standalone build, which does include it.
 setlocal
-set ROOT=%~dp0
+set ROOT=%~dp0..\
 set RT=%ROOT%runtime
 set PY=%RT%\python\python.exe
 set URL=https://github.com/astral-sh/python-build-standalone/releases/download/20250409/cpython-3.11.12+20250409-x86_64-pc-windows-msvc-install_only.tar.gz
@@ -13,7 +13,7 @@ echo   Mabinogi Voice Chat - first run setup
 echo ============================================
 echo.
 
-echo [1/3] Python runtime
+echo [1/4] Python runtime
 if exist "%PY%" (
   echo       already here, skipping
 ) else (
@@ -30,7 +30,7 @@ if exist "%PY%" (
 if errorlevel 1 goto fail
 echo.
 
-echo [2/3] packages (this downloads a few hundred MB, please wait)
+echo [2/4] packages (this downloads a few hundred MB, please wait)
 "%PY%" -m pip install --quiet --upgrade pip
 "%PY%" -m pip install -r "%ROOT%requirements.txt"
 if errorlevel 1 goto fail
@@ -54,7 +54,7 @@ echo       GPU makes recognition several times faster, but it needs
 echo       a 550 MB library that is not installed yet.
 choice /C YN /T 30 /D Y /M "Install it now (30s -> yes)"
 if errorlevel 2 (
-  echo       Skipped. You can run setup_gpu.bat later.
+  echo       Skipped. You can run scripts\setup_gpu.bat later.
   goto done
 )
 "%PY%" -m pip install nvidia-cublas-cu12

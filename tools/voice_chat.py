@@ -5,13 +5,14 @@
     python voice_chat.py --dev 28     # 마이크 지정
     python voice_chat.py --dry        # 보내지 않고 인식만
 
-창과 트레이가 있는 쪽은 상위 폴더의 mabi_voice.pyw (실행.bat) 이다.
+창과 트레이가 있는 쪽은 src/mabi_voice.pyw 다. 실행.bat 으로 띄운다.
 """
 import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 import core
 

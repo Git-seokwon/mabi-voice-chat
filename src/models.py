@@ -10,7 +10,8 @@ import os
 import shutil
 import threading
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# models.py 는 src\ 안에 있다. 프로그램 뿌리는 그 부모다.
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def models_dir():

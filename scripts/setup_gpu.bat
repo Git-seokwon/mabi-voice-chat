@@ -4,7 +4,7 @@ rem CTranslate2 needs cuBLAS (cublas64_12.dll). A CUDA Toolkit install
 rem provides it, but most people do not have one, so we fetch the pip
 rem package into our own runtime instead.
 setlocal
-set ROOT=%~dp0
+set ROOT=%~dp0..\
 set PY=%ROOT%runtime\python\python.exe
 
 if not exist "%PY%" (
@@ -26,7 +26,7 @@ echo Installing GPU support. This downloads about 550 MB.
 "%PY%" -m pip install nvidia-cublas-cu12
 if errorlevel 1 goto fail
 
-"%PY%" -c "import sys; sys.path.insert(0, r'%ROOT%'); import core; ok, note = core.cuda_ready(); print(note); sys.exit(0 if ok else 1)"
+"%PY%" -c "import sys; sys.path.insert(0, r'%ROOT%src'); import core; ok, note = core.cuda_ready(); print(note); sys.exit(0 if ok else 1)"
 if errorlevel 1 goto fail
 
 echo.
