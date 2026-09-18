@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 r"""모델 고르기·내려받기·재활용.
 
-모델은 앱 폴더의 models\<이름>\ 에 한 벌로 받아 두고 계속 쓴다.
-허깅페이스 기본 캐시에 두면 원본과 사용본을 따로 두는데, 윈도우는
-심볼릭 링크를 못 만들어 그대로 복사하므로 디스크가 두 배로 든다.
-local_dir 로 받으면 한 벌만 남는다.
+local_dir 로 받는다. 허깅페이스 기본 캐시는 윈도우에서 복사본을 하나 더
+만들어 디스크를 두 배로 쓴다.
 """
 import os
 import shutil
@@ -15,11 +13,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def models_dir():
-    r"""모델을 두는 곳. 판을 올려도 다시 받지 않도록 프로그램 폴더 밖에 둔다.
-
-    MABI_MODELS 로 직접 정할 수 있고, 예전부터 프로그램 폴더에 받아 둔
-    사람은 그대로 쓴다. core.data_dir() 이 그 판단을 맡는다.
-    """
+    r"""모델을 두는 곳. MABI_MODELS 로 정할 수 있다."""
     env = os.environ.get("MABI_MODELS")
     if env:
         return env
@@ -29,8 +23,7 @@ def models_dir():
     except Exception:
         return os.path.join(APP_DIR, "models")
 
-# 저장소 이름은 faster_whisper.utils._MODELS 와 같다. turbo 만 다른 곳에 있다.
-# size_mb 는 model.bin 기준 어림값. 실제 값은 받을 때 서버에서 다시 받아온다.
+# turbo 만 저장소가 다르다. size_mb 는 어림값이고 받을 때 서버에 다시 묻는다.
 CATALOG = [
     {"name": "tiny",           "repo": "Systran/faster-whisper-tiny",
      "size_mb": 75,   "label": "tiny",           "korean": "나쁨",
@@ -124,20 +117,17 @@ def remote_size_mb(name):
 
 
 def _tqdm_class(report):
-    """허깅페이스가 만드는 진행 표시기를 가로채 진행량을 알린다.
+    """진행 표시기를 가로채 진행량을 알린다.
 
-    더하지 않고 '가장 많이 간 것' 을 쓴다. 허깅페이스는 바이트를 세는
-    표시기를 두 개 만든다 - 받는 단계(Downloading bytes)와 파일을 다시
-    맞추는 단계(Reconstructing) 다. 둘 다 전체 크기까지 차오르므로
-    더하면 200% 가 된다. 실제로 그렇게 보였다.
+    허깅페이스가 바이트 표시기를 두 개(받기·재조립) 만들고 둘 다 전체까지
+    차오르므로, 더하지 않고 가장 많이 간 것을 쓴다.
     """
     from tqdm.auto import tqdm as base
 
     live = []
     lock = threading.Lock()
 
-    # disable=True 로 만든 tqdm 은 __init__ 을 일찍 끝내서 unit/n/total 같은
-    # 속성이 아예 없다. 그래서 tqdm 내부를 보지 않고 우리가 직접 센다.
+    # disable=True 인 tqdm 은 unit/n/total 속성이 없다. 직접 센다.
     class Reporting(base):
         def __init__(self, *a, **kw):
             self._unit = kw.get("unit", "it")
@@ -180,8 +170,7 @@ def download(name, on_progress=None, on_log=None):
 
     from huggingface_hub import snapshot_download
 
-    # 허깅페이스는 진행 표시기에 total 을 바로 넣어 주지 않는다. 그래서
-    # 전체 크기는 서버에 미리 물어 두고, 진행 표시기에서는 받은 양만 쓴다.
+    # 표시기에 total 이 안 들어오므로 전체 크기는 서버에 따로 묻는다.
     total_mb = remote_size_mb(name)
 
     def report(done_bytes, _unused_total):

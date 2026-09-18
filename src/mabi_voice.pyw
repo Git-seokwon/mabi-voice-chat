@@ -398,8 +398,7 @@ class App:
         self.panes[key].pack(fill="both", expand=True)
 
     def _labels(self):
-        # ttk.Scale 은 set() 하는 순간 command 를 부른다. 창을 만드는 도중이라
-        # 라벨이 아직 없을 수 있으니 조용히 넘긴다.
+        # ttk.Scale 은 set() 할 때 command 를 부른다. 라벨이 아직 없을 수 있다.
         if not hasattr(self, "ml_lbl"):
             return
         self.nm_lbl.config(text="민감도  소음의 %.1f배" % float(self.nm.get()))
@@ -469,8 +468,7 @@ class App:
 
     # ------------------------------------------------------------ 엔진
     def _boot(self):
-        # 엔진은 on_event(kind, text, meta) 로 세 인자를 준다.
-        # queue.put 을 그대로 넘기면 put(item, block, timeout) 으로 먹히므로 감싼다.
+        # queue.put 을 그대로 넘기면 put(item, block, timeout) 으로 먹힌다
         self.engine = core.Engine(self.s,
                                   on_event=lambda k, t, m: self.events.put((k, t, m)),
                                   on_level=self._set_level)
@@ -484,8 +482,7 @@ class App:
 
     # ------------------------------------------------------------ 이벤트
     def _drain(self):
-        # 이 안에서 예외가 새면 화면만 죽고 엔진은 계속 채팅을 보낸다.
-        # 그런 반쪽 상태가 제일 위험하므로, 무슨 일이 있어도 되돌아온다.
+        # 예외가 새면 화면만 죽고 엔진은 계속 보낸다. 무슨 일이 있어도 되돌아온다.
         try:
             while True:
                 try:
@@ -633,9 +630,7 @@ class App:
             return
         self.gn.set(gain)
         self.s["gain"] = gain
-        # 증폭이 음량을 표준 수준으로 끌어올리므로 문턱은 기본값 0.012 로
-        # 되돌린다. 다만 증폭을 최대로 걸어도 목표에 못 미치는 아주 작은
-        # 마이크라면, 못 미친 만큼 문턱도 같이 낮춘다.
+        # 문턱은 기본값으로. 증폭해도 목표에 못 미치면 그만큼 낮춘다.
         reached = peak * gain
         low = round(0.012 * max(0.25, min(1.0, reached / 0.35)), 4)
         self.ml.set(low)

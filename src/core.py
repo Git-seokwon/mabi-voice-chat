@@ -19,14 +19,12 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 
 # ---------------------------------------------------------------- CUDA 준비
-# GPU 로 인식하려면 cuBLAS 가 있어야 한다. 이게 없으면 윈도우가
-# "cublas64_12.dll 을 찾을 수 없습니다" 모달 창을 띄우고 프로그램이 멈춘다.
-# 그래서 (1) 그 창을 막고 (2) 있을 만한 자리를 검색 경로에 넣고
-# (3) 실제로 불러와 본 뒤에야 CUDA 를 시도한다.
+# cuBLAS 가 없으면 윈도우가 모달 창을 띄우고 멈춘다. 그래서 창을 막고,
+# 검색 경로를 넓히고, 실제로 불러와 본 뒤에야 CUDA 를 쓴다.
 _cuda_note = None
 _cuda_ok = None
 
@@ -94,13 +92,7 @@ EXE = "MabinogiMobile_CLI.exe"
 
 
 def _reg_path_dirs():
-    """레지스트리에 적힌 PATH 를 직접 읽는다.
-
-    PATH 는 프로세스가 시작할 때 물려받는다. 게임이 토글을 켜며 PATH 에
-    등록해도, 이미 떠 있던 탐색기에서 실행한 프로그램은 옛 PATH 를 쥐고
-    있어서 찾지 못한다. 재부팅해야 풀리는 그 문제를 레지스트리를 직접
-    읽어 비켜간다.
-    """
+    """레지스트리의 PATH. 프로세스가 물려받은 PATH 가 낡았을 때를 위한 것."""
     import winreg
     out = []
     for root, sub in (
@@ -170,11 +162,7 @@ def _drive_dirs():
 
 
 def find_cli(settings=None):
-    """게임 CLI 를 찾는다. 못 찾으면 None.
-
-    PATH 한 갈래만 믿지 않는다. 실제로 PATH 에 등록이 안 되어 있거나,
-    등록됐어도 프로세스가 옛 PATH 를 쥔 경우가 있다.
-    """
+    """게임 CLI 를 찾는다. 못 찾으면 None. PATH 한 갈래만 믿지 않는다."""
     # 1) 사람이 직접 지정한 것이 가장 우선
     for p in ((settings or {}).get("cli_path"), os.environ.get("MABI_CLI")):
         if p and os.path.isfile(p):
@@ -206,15 +194,7 @@ _HINTS = ("nexon", "mabinogi", "game", "games", "program files")
 
 
 def deep_find_cli(time_budget=25.0, on_progress=None):
-    r"""디스크를 직접 훑어 CLI 를 찾는다. 찾으면 경로, 못 찾으면 None.
-
-    전체 검색은 몇 분이 걸리므로 이렇게 줄인다.
-      - 얕은 곳부터 본다(너비 우선). 게임은 보통 깊지 않은 곳에 깔린다.
-      - 깊이 5칸까지만 들어간다.
-      - 윈도우 폴더나 캐시처럼 있을 리 없는 곳은 건너뛴다.
-      - 'nexon' 'mabinogi' 'game' 이 든 폴더를 먼저 본다.
-      - 정해 둔 시간이 지나면 멈춘다.
-    """
+    """디스크를 훑어 CLI 를 찾는다. 얕은 곳부터, 깊이 5칸까지, 시간 안에서만."""
     import string
     from collections import deque as dq
 
@@ -288,8 +268,6 @@ MAX_SEC = 15.0                # 이보다 길면 잘라서 넘김
 PRE_ROLL = 6                  # 말 시작 직전 프레임도 함께 (첫 음절 보존)
 
 # --- 전역 단축키 ---
-# GetAsyncKeyState 로 키 상태를 직접 읽는다. 창 포커스와 무관하므로
-# 다른 게임이 앞에 있어도 먹힌다.
 VK_CONTROL, VK_SHIFT, VK_MENU = 0x11, 0x10, 0x12
 VK_LWIN, VK_RWIN = 0x5B, 0x5C
 
@@ -322,8 +300,7 @@ def parse_hotkey(spec):
     return mods, key
 
 
-# RegisterHotKey 용 모디파이어 비트. 이쪽은 운영체제가 조합을 먼저 가로채므로
-# 게임이 키를 삼켜도, 게임이 관리자 권한이어도 우리에게 전달된다.
+# RegisterHotKey 용 모디파이어 비트
 MOD_FLAGS = {"alt": 0x0001, "ctrl": 0x0002, "control": 0x0002,
              "shift": 0x0004, "win": 0x0008}
 MOD_NOREPEAT = 0x4000
@@ -372,14 +349,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def data_dir():
-    r"""내 것(모델·설정·기록)을 두는 곳. 판을 올려도 살아남아야 한다.
-
-    1) MABI_DATA 환경변수
-    2) 프로그램 폴더에 이미 내 것이 있으면 그대로 쓴다. 예전부터 쓰던
-       사람의 설정과 모델을 잃지 않기 위한 배려다.
-    3) %LOCALAPPDATA%\mabi-voice-chat — 새로 깔면 이쪽. 프로그램 폴더를
-       통째로 덮어써도, 아예 다른 폴더에 풀어도 모델이 남는다.
-    """
+    r"""모델·설정·기록을 두는 곳. MABI_DATA > 프로그램 폴더 > %LOCALAPPDATA%."""
     env = os.environ.get("MABI_DATA")
     if env:
         return env
@@ -417,11 +387,7 @@ _mutex = None
 
 
 def claim_single_instance(name="mabi_voice_chat"):
-    """이미 돌고 있으면 False. 두 개가 동시에 들으면 채팅이 두 번씩 나간다.
-
-    이름 있는 뮤텍스는 프로세스가 죽으면 윈도우가 알아서 풀어 주므로,
-    강제 종료되어도 잠금이 남지 않는다.
-    """
+    """이미 돌고 있으면 False. 두 개가 들으면 채팅이 두 번씩 나간다."""
     global _mutex
     ERROR_ALREADY_EXISTS = 183
     k32 = ctypes.windll.kernel32
@@ -587,8 +553,7 @@ class Engine:
         import models
         if models.is_installed(name):
             return models.model_dir(name), "models 폴더"
-        # 앱 폴더에 없더라도 허깅페이스 캐시에 이미 있으면 그걸 쓴다.
-        # 3GB 를 다시 받게 하지 않기 위한 배려다.
+        # 허깅페이스 캐시에 이미 있으면 그걸 쓴다. 다시 받게 하지 않는다.
         try:
             from faster_whisper import WhisperModel
             WhisperModel(name, device="cpu", compute_type="int8",
@@ -640,7 +605,7 @@ class Engine:
     # --- 마이크 콜백
     def _on_audio(self, indata, frames, time_info, status):
         frame = indata[:, 0].copy()
-        # 증폭 전의 크기를 따로 남긴다. '자동 맞추기' 가 이 값을 본다.
+        # 자동 맞추기가 보는 값 (증폭 전)
         self.raw_max = max(self.raw_max, float(np.abs(frame).max()))
         gain = float(self.s.get("gain", 1.0))
         if gain != 1.0:
@@ -733,14 +698,8 @@ class Engine:
 
     # --- 단축키 감시
     def _watch_key(self):
-        """먼저 RegisterHotKey 로 등록해 본다. 실패하면 키 상태 읽기로 대신한다.
-
-        GetAsyncKeyState 로 읽는 방식은 게임이 관리자 권한으로 돌고 우리가
-        아니면 막힌다. RegisterHotKey 는 운영체제가 조합을 가로채서 우리
-        메시지 큐에 넣어 주므로 그 벽을 넘는다. Win 조합을 써도 시작 메뉴가
-        열리지 않는다 - 운영체제가 조합을 먹어 버리기 때문이다.
-        """
-        # 단축키를 바꾸면 다시 등록해야 하므로 통째로 되돌아오는 고리로 둔다.
+        """RegisterHotKey 로 등록한다. 실패하면 키 상태 읽기로 대신한다."""
+        # 단축키를 바꾸면 다시 등록해야 하므로 고리로 둔다
         while not self.stop_flag.is_set():
             self.hotkey_restart.clear()
             spec = self.s.get("hotkey", "win+f9")
@@ -764,8 +723,7 @@ class Engine:
         flags, vk = hotkey_flags(spec)
         if vk is None:
             return False
-        # RegisterHotKey 는 등록한 스레드의 큐로 WM_HOTKEY 를 보낸다.
-        # 그래서 등록과 메시지 받기를 같은 스레드에서 해야 한다.
+        # 등록과 메시지 받기는 같은 스레드여야 한다
         if not u32.RegisterHotKey(None, 1, flags | MOD_NOREPEAT, vk):
             return False
         self.on_event("info", "단축키 %s 등록됨" % hotkey_label(spec), {})
