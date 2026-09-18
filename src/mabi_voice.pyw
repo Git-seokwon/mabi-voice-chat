@@ -17,93 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import core
 import models
-
-# ---------------------------------------------------------------- 모양
-BG      = "#14151b"     # 창 바닥
-CARD    = "#1c1e27"     # 카드
-LINE    = "#2b2e3c"     # 경계선
-FG      = "#e9eaf0"     # 본문
-DIM     = "#a2a8b8"     # 보조
-MUTE    = "#6f7585"     # 더 옅게
-MINT    = "#6ee7a8"     # 켜짐
-AMBER   = "#e9b44c"     # 주의 · 문턱
-RED     = "#ef6b6b"     # 오류
-HOVER   = "#282b38"
-
-F_TITLE = ("Malgun Gothic", 14, "bold")
-F_BODY  = ("Malgun Gothic", 9)
-F_SMALL = ("Malgun Gothic", 8)
-F_CAP   = ("Consolas", 10, "bold")      # 키캡
-F_SEC   = ("Malgun Gothic", 8, "bold")  # 구역 제목
-
-
-def card(parent, **kw):
-    f = tk.Frame(parent, bg=CARD, highlightbackground=LINE,
-                 highlightthickness=1, bd=0, **kw)
-    return f
-
-
-def section(parent, text):
-    return tk.Label(parent, text=text, bg=CARD, fg=MUTE, font=F_SEC, anchor="w")
-
-
-class Btn(tk.Label):
-    """평평한 버튼. tk.Button 은 윈도우에서 테두리가 지워지지 않아 Label 로 만든다."""
-
-    def __init__(self, parent, text, command, primary=False, bg=CARD, **kw):
-        self.primary = primary
-        self.base = bg
-        self.command = command
-        self._enabled = True
-        fg = BG if primary else FG
-        fill = MINT if primary else HOVER
-        super().__init__(parent, text=text, bg=fill, fg=fg, font=F_BODY,
-                         padx=12, pady=6, cursor="hand2", **kw)
-        self._fill = fill
-        self._fg = fg
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
-
-    def _on_enter(self, _):
-        if self._enabled:
-            self.config(bg="#8df0bf" if self.primary else "#33374a")
-
-    def _on_leave(self, _):
-        if self._enabled:
-            self.config(bg=self._fill)
-
-    def _on_click(self, _):
-        if self._enabled and self.command:
-            self.command()
-
-    def set_enabled(self, on):
-        self._enabled = bool(on)
-        self.config(fg=self._fg if on else MUTE,
-                    bg=self._fill if on else CARD,
-                    cursor="hand2" if on else "arrow")
-
-
-class Meter(tk.Canvas):
-    """음량 막대. 지금 음량과 '말소리로 인정하는 문턱' 을 함께 보여준다."""
-
-    def __init__(self, parent, height=8, bg=CARD, **kw):
-        super().__init__(parent, height=height, bg=bg, highlightthickness=0, **kw)
-        self.h = height
-        self.track = self.create_rectangle(0, 0, 0, height, fill="#23262f", width=0)
-        self.fill = self.create_rectangle(0, 0, 0, height, fill=MINT, width=0)
-        self.tick = self.create_rectangle(0, 0, 0, height, fill=AMBER, width=0)
-        self.bind("<Configure>", lambda e: self.coords(self.track, 0, 0, e.width, self.h))
-
-    def paint(self, frac, thr_frac=None, color=MINT):
-        w = max(1, self.winfo_width())
-        self.coords(self.fill, 0, 0, int(w * max(0.0, min(1.0, frac))), self.h)
-        self.itemconfig(self.fill, fill=color)
-        if thr_frac is None:
-            self.coords(self.tick, 0, 0, 0, 0)
-        else:
-            x = int(w * max(0.0, min(1.0, thr_frac)))
-            self.coords(self.tick, x, 0, x + 2, self.h)
+import ui
+from ui import (BG, CARD, SUNK, LINE, FG, DIM, MUTE, MINT, AMBER, RED,
+                F_TITLE, F_BODY, F_SMALL, F_CAP)
 
 
 class App:
@@ -122,12 +38,12 @@ class App:
         self.root = tk.Tk()
         self.root.title("마비노기 음성 채팅 %s" % core.VERSION)
         self.root.configure(bg=BG)
-        self.root.geometry("580x660")
-        self.root.minsize(520, 600)
+        self.root.geometry("600x740")
+        self.root.minsize(460, 420)     # 작게 줄여도 스크롤로 다 볼 수 있다
         self.root.protocol("WM_DELETE_WINDOW", self.hide)
         self.root.bind("<Unmap>", self._on_unmap)
 
-        self._theme()
+        ui.apply_theme(self.root)
         self._build()
         self.root.after(50, self._drain)
         self.root.after(60, self._tick_level)
@@ -135,118 +51,98 @@ class App:
         threading.Thread(target=self._boot, daemon=True).start()
         self._start_tray()
 
-    # ------------------------------------------------------------ 테마
-    def _theme(self):
-        st = ttk.Style()
-        st.theme_use("clam")        # clam 이어야 색을 바꿀 수 있다
-        st.configure("D.TCombobox", fieldbackground=HOVER, background=HOVER,
-                     foreground=FG, arrowcolor=DIM, bordercolor=LINE,
-                     lightcolor=HOVER, darkcolor=HOVER, selectbackground=HOVER,
-                     selectforeground=FG, padding=4)
-        st.map("D.TCombobox", fieldbackground=[("readonly", HOVER)],
-               foreground=[("readonly", FG)])
-        st.configure("D.Horizontal.TScale", background=CARD, troughcolor="#23262f",
-                     bordercolor=CARD, lightcolor=MINT, darkcolor=MINT)
-        st.configure("D.Vertical.TScrollbar", background=HOVER, troughcolor=CARD,
-                     bordercolor=CARD, arrowcolor=DIM, lightcolor=HOVER,
-                     darkcolor=HOVER)
-
     # ------------------------------------------------------------ 화면
     def _build(self):
         outer = tk.Frame(self.root, bg=BG)
-        outer.pack(fill="both", expand=True, padx=14, pady=14)
+        outer.pack(fill="both", expand=True, padx=12, pady=12)
 
         # ---- 상태 카드
-        top = card(outer)
+        top = ui.Card(outer)
         top.pack(fill="x")
-        pad = tk.Frame(top, bg=CARD)
-        pad.pack(fill="x", padx=14, pady=12)
+        b = top.body
 
-        line1 = tk.Frame(pad, bg=CARD)
+        line1 = tk.Frame(b, bg=CARD)
         line1.pack(fill="x")
-        self.dot = tk.Label(line1, text="●", bg=CARD, fg=MUTE, font=("Segoe UI", 16))
+        self.dot = tk.Label(line1, text="●", bg=CARD, fg=MUTE, font=("Segoe UI", 17))
         self.dot.pack(side="left")
         names = tk.Frame(line1, bg=CARD)
-        names.pack(side="left", padx=(8, 0))
+        names.pack(side="left", padx=(10, 0))
         self.state_lbl = tk.Label(names, text="준비 중", bg=CARD, fg=FG,
                                   font=F_TITLE, anchor="w")
         self.state_lbl.pack(anchor="w")
-        self.info_lbl = tk.Label(names, text="모델을 올리고 있습니다", bg=CARD,
-                                 fg=MUTE, font=F_SMALL, anchor="w")
+        self.info_lbl = ui.label(names, "모델을 올리고 있습니다", MUTE, F_SMALL)
         self.info_lbl.pack(anchor="w")
 
         right = tk.Frame(line1, bg=CARD)
         right.pack(side="right")
-        self.toggle_btn = Btn(right, "듣기 끄기", self.toggle, primary=True)
+        self.toggle_btn = ui.Button(right, "듣기 끄기", self.toggle, kind="primary")
         self.toggle_btn.pack(side="right")
-        self.hk_pill = tk.Label(right, text="Win+F9", bg="#23262f", fg=DIM,
-                                font=F_CAP, padx=8, pady=4)
+        self.hk_pill = tk.Label(right, text="Win+F9", bg=SUNK, fg=DIM,
+                                font=F_CAP, padx=10, pady=5)
         self.hk_pill.pack(side="right", padx=(0, 8))
 
-        m = tk.Frame(pad, bg=CARD)
-        m.pack(fill="x", pady=(12, 0))
-        self.meter = Meter(m)
-        self.meter.pack(fill="x")
-        self.meter_lbl = tk.Label(pad, text="초록은 지금 음량, 주황은 말소리로 보는 문턱",
-                                  bg=CARD, fg=MUTE, font=F_SMALL, anchor="w")
-        # 마이크가 작은지 눈으로 알 수 있게 실제 값도 적는다
-        self.meter_lbl.pack(fill="x", pady=(4, 0))
+        self.meter = ui.Bar(b)
+        self.meter.pack(fill="x", pady=(14, 0))
+        self.meter_lbl = ui.label(b, "", MUTE, F_SMALL)
+        self.meter_lbl.pack(fill="x", pady=(6, 0))
 
         # ---- 탭
         tabs = tk.Frame(outer, bg=BG)
-        tabs.pack(fill="x", pady=(12, 8))
+        tabs.pack(fill="x", pady=(14, 8))
         self.tab_btns = {}
         for key, text in (("log", "기록"), ("cfg", "설정")):
-            b = tk.Label(tabs, text=text, bg=BG, fg=MUTE, font=F_BODY,
-                         padx=14, pady=5, cursor="hand2")
-            b.pack(side="left", padx=(0, 4))
-            b.bind("<Button-1>", lambda e, k=key: self.show_tab(k))
-            self.tab_btns[key] = b
+            t = ui.Button(tabs, text, lambda k=key: self.show_tab(k),
+                          kind="quiet", bg=BG, padx=18, pady=7)
+            t.pack(side="left", padx=(0, 6))
+            self.tab_btns[key] = t
+
+        # 바닥을 먼저 자리잡게 한다. 창을 줄였을 때 밀려나 사라지지 않도록.
+        foot = tk.Frame(outer, bg=BG)
+        foot.pack(side="bottom", fill="x", pady=(12, 0))
+        ui.label(foot, "창을 닫거나 최소화하면 작은 표시창으로 내려갑니다",
+                 MUTE, F_SMALL, bg=BG).pack(side="left")
+        ui.Button(foot, "종료", self.quit, kind="quiet", bg=BG).pack(side="right")
 
         self.body = tk.Frame(outer, bg=BG)
         self.body.pack(fill="both", expand=True)
         self.panes = {"log": self._build_log(), "cfg": self._build_cfg()}
         self.show_tab("log")
 
-        # ---- 바닥
-        foot = tk.Frame(outer, bg=BG)
-        foot.pack(fill="x", pady=(10, 0))
-        tk.Label(foot, text="창을 닫거나 최소화하면 작은 표시창으로 내려갑니다",
-                 bg=BG, fg=MUTE, font=F_SMALL).pack(side="left")
-        Btn(foot, "종료", self.quit, bg=BG).pack(side="right")
-
         self._labels()
         self.pick_model()
+        self._paint_cli()
 
     def _build_log(self):
-        c = card(self.body)
-        box = tk.Frame(c, bg=CARD)
-        box.pack(fill="both", expand=True, padx=2, pady=2)
+        c = ui.Card(self.body, pad=10)
+        box = tk.Frame(c.body, bg=CARD)
+        box.pack(fill="both", expand=True)
         self.log = tk.Text(box, bg=CARD, fg=FG, relief="flat", bd=0, wrap="word",
-                           font=F_BODY, padx=12, pady=10, state="disabled",
-                           insertbackground=FG, selectbackground=HOVER)
+                           font=F_BODY, padx=6, pady=4, state="disabled",
+                           insertbackground=FG, selectbackground=SUNK,
+                           highlightthickness=0, height=8)
         self.log.pack(side="left", fill="both", expand=True)
-        sb = ttk.Scrollbar(box, command=self.log.yview, style="D.Vertical.TScrollbar")
+        sb = ttk.Scrollbar(box, command=self.log.yview,
+                           style="D.Vertical.TScrollbar")
         sb.pack(side="right", fill="y")
         self.log.configure(yscrollcommand=sb.set)
-        self.log.tag_configure("sent", foreground=MINT)
-        self.log.tag_configure("dropped", foreground=MUTE)
-        self.log.tag_configure("error", foreground=RED)
-        self.log.tag_configure("info", foreground=DIM)
-        self.log.tag_configure("listen", foreground=AMBER)
+        for tag, col in (("sent", MINT), ("dropped", MUTE), ("error", RED),
+                         ("info", DIM), ("listen", AMBER)):
+            self.log.tag_configure(tag, foreground=col)
         self.log.tag_configure("meta", foreground=MUTE, font=F_SMALL)
         return c
 
+    # ---- 설정: 카드 여러 장을 세로로 넘겨 본다
     def _build_cfg(self):
-        c = card(self.body)
-        g = tk.Frame(c, bg=CARD)
-        g.pack(fill="both", expand=True, padx=14, pady=12)
-        g.columnconfigure(1, weight=1)
-        r = 0
+        area = ui.ScrollArea(self.body)
+        col = area.body
 
-        # 마이크
-        section(g, "마이크").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
+        # 1) 마이크
+        c = ui.Card(col)
+        c.pack(fill="x", pady=(0, 10))
+        g = c.body
+        g.columnconfigure(1, weight=1)
+        ui.section(g, "마이크").grid(row=0, column=0, columnspan=2, sticky="w")
+
         self.devs = [(None, "윈도우 기본 · %s" % core.device_name(None))]
         self.devs += [(i, "%d · %s" % (i, d["name"].strip()[:38]))
                       for i, d in core.input_devices()]
@@ -257,13 +153,79 @@ class App:
         cur = self.s.get("device")
         self.dev_cb.current(next((k for k, (i, _) in enumerate(self.devs)
                                   if i == cur), 0))
-        self.dev_cb.grid(row=r, column=0, columnspan=2, sticky="we", pady=(4, 12))
+        self.dev_cb.grid(row=1, column=0, columnspan=2, sticky="we", pady=(8, 14))
         self.dev_cb.bind("<<ComboboxSelected>>", self.change_device)
-        r += 1
 
-        # 모델
-        section(g, "모델").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
+        self.nm_lbl = ui.label(g, "")
+        self.nm_lbl.grid(row=2, column=0, sticky="w", pady=3)
+        self.nm = ttk.Scale(g, from_=1.5, to=8.0, orient="horizontal",
+                            command=self.change_noise, style="D.Horizontal.TScale")
+        self.nm.set(float(self.s.get("noise_mult", 3.0)))
+        self.nm.grid(row=2, column=1, sticky="we", padx=(14, 0), pady=3)
+
+        self.hs_lbl = ui.label(g, "")
+        self.hs_lbl.grid(row=3, column=0, sticky="w", pady=3)
+        self.hs = ttk.Scale(g, from_=0.3, to=2.5, orient="horizontal",
+                            command=self.change_hang, style="D.Horizontal.TScale")
+        self.hs.set(float(self.s.get("hang_sec", 0.8)))
+        self.hs.grid(row=3, column=1, sticky="we", padx=(14, 0), pady=3)
+
+        self.gn_lbl = ui.label(g, "")
+        self.gn_lbl.grid(row=4, column=0, sticky="w", pady=3)
+        self.gn = ttk.Scale(g, from_=1.0, to=20.0, orient="horizontal",
+                            command=self.change_gain, style="D.Horizontal.TScale")
+        self.gn.set(float(self.s.get("gain", 1.0)))
+        self.gn.grid(row=4, column=1, sticky="we", padx=(14, 0), pady=3)
+
+        self.ml_lbl = ui.label(g, "")
+        self.ml_lbl.grid(row=5, column=0, sticky="w", pady=3)
+        self.ml = ttk.Scale(g, from_=0.001, to=0.05, orient="horizontal",
+                            command=self.change_minlevel, style="D.Horizontal.TScale")
+        self.ml.set(float(self.s.get("min_level", 0.012)))
+        self.ml.grid(row=5, column=1, sticky="we", padx=(14, 0), pady=3)
+
+        self.cal_btn = ui.Button(g, "마이크 자동 맞추기", self.calibrate)
+        self.cal_btn.grid(row=6, column=0, sticky="w", pady=(12, 0))
+        self.cal_lbl = ui.label(g, "마이크가 작아 인식이 안 되면 눌러 주세요",
+                                MUTE, F_SMALL, wraplength=260, justify="left")
+        self.cal_lbl.grid(row=6, column=1, sticky="we", padx=(14, 0), pady=(12, 0))
+
+        # 2) 말하기 방식과 단축키
+        c = ui.Card(col)
+        c.pack(fill="x", pady=(0, 10))
+        g = c.body
+        g.columnconfigure(1, weight=1)
+        ui.section(g, "말하기 방식").grid(row=0, column=0, columnspan=2, sticky="w")
+        self.modes = [("auto", "자동 감지 — 말하면 알아서 잡습니다"),
+                      ("ptt", "눌러서 말하기 — 단축키로 시작하고 다시 눌러 끝냅니다")]
+        self.mode_var = tk.StringVar()
+        self.mode_cb = ttk.Combobox(g, state="readonly", textvariable=self.mode_var,
+                                    values=[t for _, t in self.modes],
+                                    style="D.TCombobox")
+        self.mode_cb.current(next((k for k, (v, _) in enumerate(self.modes)
+                                   if v == self.s.get("mode", "auto")), 0))
+        self.mode_cb.grid(row=1, column=0, columnspan=2, sticky="we", pady=(8, 16))
+        self.mode_cb.bind("<<ComboboxSelected>>", self.change_mode)
+
+        ui.section(g, "듣기 켜고 끄기 단축키").grid(row=2, column=0, columnspan=2,
+                                              sticky="w")
+        hk = tk.Frame(g, bg=CARD)
+        hk.grid(row=3, column=0, columnspan=2, sticky="we", pady=(8, 0))
+        self.hk_cap = tk.Label(hk, text="Win+F9", bg=SUNK, fg=FG, font=F_CAP,
+                               padx=16, pady=8)
+        self.hk_cap.pack(side="left")
+        self.hk_btn = ui.Button(hk, "키 바꾸기", self.start_capture)
+        self.hk_btn.pack(side="left", padx=(10, 0))
+        self.hk_hint = ui.label(g, "버튼을 누른 뒤 원하는 조합을 누르세요",
+                                MUTE, F_SMALL, wraplength=380, justify="left")
+        self.hk_hint.grid(row=4, column=0, columnspan=2, sticky="we", pady=(8, 0))
+
+        # 3) 모델
+        c = ui.Card(col)
+        c.pack(fill="x", pady=(0, 10))
+        g = c.body
+        g.columnconfigure(0, weight=1)
+        ui.section(g, "모델").grid(row=0, column=0, columnspan=2, sticky="w")
         self.model_rows = models.catalog_rows()
         self.model_var = tk.StringVar()
         self.model_cb = ttk.Combobox(g, state="readonly", textvariable=self.model_var,
@@ -272,178 +234,80 @@ class App:
         cur_model = self.s.get("model") or models.DEFAULT
         self.model_cb.current(next((k for k, x in enumerate(self.model_rows)
                                     if x["name"] == cur_model), 0))
-        self.model_cb.grid(row=r, column=0, sticky="we", pady=(4, 0))
-        self.model_cb.bind("<<ComboboxSelected>>", self.pick_model)
+        self.model_cb.grid(row=1, column=0, sticky="we", pady=(8, 0))
         mb = tk.Frame(g, bg=CARD)
-        mb.grid(row=r, column=1, sticky="e", padx=(10, 0), pady=(4, 0))
-        self.model_del = Btn(mb, "지우기", self.delete_model)
+        mb.grid(row=1, column=1, sticky="e", padx=(10, 0), pady=(8, 0))
+        self.model_del = ui.Button(mb, "지우기", self.delete_model, kind="quiet")
         self.model_del.pack(side="left", padx=(0, 6))
-        self.model_btn = Btn(mb, "적용", self.apply_model)
+        self.model_btn = ui.Button(mb, "적용", self.apply_model)
         self.model_btn.pack(side="left")
-        r += 1
-        self.model_note = tk.Label(g, text="", bg=CARD, fg=MUTE, font=F_SMALL,
-                                   anchor="w", justify="left")
-        self.model_note.grid(row=r, column=0, columnspan=2, sticky="we", pady=(4, 0))
-        r += 1
-        self.dl = Meter(g, height=6)
-        self.dl_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_SMALL, anchor="w")
-        self.dl_row = r
-        r += 2                                  # 내려받는 동안만 쓰는 두 줄
-        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
-                                            sticky="we", pady=12)
-        r += 1
+        self.model_cb.bind("<<ComboboxSelected>>", self.pick_model)
+        self.model_note = ui.label(g, "", MUTE, F_SMALL, wraplength=420,
+                                   justify="left")
+        self.model_note.grid(row=2, column=0, columnspan=2, sticky="we", pady=(8, 0))
+        self.dl = ui.Bar(g, height=8)
+        self.dl_lbl = ui.label(g, "", DIM, F_SMALL)
+        self.dl_row = 3
 
-        # 단축키
-        section(g, "듣기 켜고 끄기 단축키").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        hk = tk.Frame(g, bg=CARD)
-        hk.grid(row=r, column=0, columnspan=2, sticky="we", pady=(6, 0))
-        self.hk_cap = tk.Label(hk, text="Win+F9", bg="#23262f", fg=FG,
-                               font=F_CAP, padx=14, pady=7)
-        self.hk_cap.pack(side="left")
-        self.hk_btn = Btn(hk, "키 바꾸기", self.start_capture)
-        self.hk_btn.pack(side="left", padx=(8, 0))
-        r += 1
-        self.hk_hint = tk.Label(g, text="버튼을 누른 뒤 원하는 조합을 누르세요",
-                                bg=CARD, fg=MUTE, font=F_SMALL, anchor="w")
-        self.hk_hint.grid(row=r, column=0, columnspan=2, sticky="we", pady=(5, 12))
-        r += 1
-        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
-                                            sticky="we", pady=(0, 12))
-        r += 1
-
-        # 말하기 방식
-        section(g, "말하기 방식").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        self.modes = [("auto", "자동 감지 — 말하면 알아서 잡습니다"),
-                      ("ptt", "눌러서 말하기 — 단축키로 시작하고 다시 눌러 끝냅니다")]
-        self.mode_var = tk.StringVar()
-        self.mode_cb = ttk.Combobox(g, state="readonly", textvariable=self.mode_var,
-                                    values=[t for _, t in self.modes],
-                                    style="D.TCombobox")
-        cur_mode = self.s.get("mode", "auto")
-        self.mode_cb.current(next((k for k, (v, _) in enumerate(self.modes)
-                                   if v == cur_mode), 0))
-        self.mode_cb.grid(row=r, column=0, columnspan=2, sticky="we", pady=(6, 12))
-        self.mode_cb.bind("<<ComboboxSelected>>", self.change_mode)
-        r += 1
-
-        # 낱말
-        section(g, "낱말 도움").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        tk.Label(g, text="자주 쓰는 말", bg=CARD, fg=DIM, font=F_BODY,
-                 anchor="w").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        # 4) 낱말
+        c = ui.Card(col)
+        c.pack(fill="x", pady=(0, 10))
+        g = c.body
+        g.columnconfigure(1, weight=1)
+        ui.section(g, "낱말 도움").grid(row=0, column=0, columnspan=2, sticky="w")
+        ui.label(g, "자주 쓰는 말").grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.vocab_var = tk.StringVar(value=self.s.get("vocab", ""))
-        ve = tk.Entry(g, textvariable=self.vocab_var, bg=HOVER, fg=FG,
-                      relief="flat", insertbackground=FG, font=F_BODY)
-        ve.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
+        ve = ui.entry(g, self.vocab_var)
+        ve.grid(row=1, column=1, sticky="we", padx=(14, 0), pady=(10, 0), ipady=4)
         ve.bind("<Return>", self.change_vocab)
         ve.bind("<FocusOut>", self.change_vocab)
-        r += 1
-        tk.Label(g, text="고쳐 쓰기", bg=CARD, fg=DIM, font=F_BODY,
-                 anchor="w").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        ui.label(g, "고쳐 쓰기").grid(row=2, column=0, sticky="w", pady=(8, 0))
         self.repl_var = tk.StringVar(value=self.s.get("replace", ""))
-        re_ = tk.Entry(g, textvariable=self.repl_var, bg=HOVER, fg=FG,
-                       relief="flat", insertbackground=FG, font=F_BODY)
-        re_.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
+        re_ = ui.entry(g, self.repl_var)
+        re_.grid(row=2, column=1, sticky="we", padx=(14, 0), pady=(8, 0), ipady=4)
         re_.bind("<Return>", self.change_replace)
         re_.bind("<FocusOut>", self.change_replace)
-        r += 1
-        tk.Label(g, text="쉼표로 나눕니다.  고쳐 쓰기는 «던젼>던전, 파뤼>파티» 꼴",
-                 bg=CARD, fg=MUTE, font=F_SMALL, anchor="w"
-                 ).grid(row=r, column=0, columnspan=2, sticky="we", pady=(5, 12))
-        r += 1
-        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
-                                            sticky="we", pady=(0, 12))
-        r += 1
+        ui.label(g, "쉼표로 나눕니다.  고쳐 쓰기는 «던젼>던전, 파뤼>파티» 꼴",
+                 MUTE, F_SMALL, wraplength=420, justify="left"
+                 ).grid(row=3, column=0, columnspan=2, sticky="we", pady=(10, 0))
 
-        # 감지
-        section(g, "목소리 감지").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        self.nm_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_BODY, anchor="w")
-        self.nm_lbl.grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.nm = ttk.Scale(g, from_=1.5, to=8.0, orient="horizontal",
-                            command=self.change_noise, style="D.Horizontal.TScale")
-        self.nm.set(float(self.s.get("noise_mult", 3.0)))
-        self.nm.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
-        r += 1
-        self.hs_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_BODY, anchor="w")
-        self.hs_lbl.grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.hs = ttk.Scale(g, from_=0.3, to=2.5, orient="horizontal",
-                            command=self.change_hang, style="D.Horizontal.TScale")
-        self.hs.set(float(self.s.get("hang_sec", 0.8)))
-        self.hs.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
-        r += 1
-
-        self.gn_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_BODY, anchor="w")
-        self.gn_lbl.grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.gn = ttk.Scale(g, from_=1.0, to=20.0, orient="horizontal",
-                            command=self.change_gain, style="D.Horizontal.TScale")
-        self.gn.set(float(self.s.get("gain", 1.0)))
-        self.gn.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
-        r += 1
-
-        self.ml_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_BODY, anchor="w")
-        self.ml_lbl.grid(row=r, column=0, sticky="w", pady=(6, 0))
-        self.ml = ttk.Scale(g, from_=0.001, to=0.05, orient="horizontal",
-                            command=self.change_minlevel, style="D.Horizontal.TScale")
-        self.ml.set(float(self.s.get("min_level", 0.012)))
-        self.ml.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
-        r += 1
-
-        self.cal_btn = Btn(g, "마이크 자동 맞추기", self.calibrate)
-        self.cal_btn.grid(row=r, column=0, sticky="w", pady=(10, 0))
-        self.cal_lbl = tk.Label(g, text="마이크가 작아 인식이 안 되면 이걸 누른다",
-                                bg=CARD, fg=MUTE, font=F_SMALL, anchor="w",
-                                wraplength=300, justify="left")
-        self.cal_lbl.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(10, 0))
-        r += 1
-        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
-                                            sticky="we", pady=12)
-        r += 1
-
-        # 그밖에
+        # 5) 그밖에
+        c = ui.Card(col)
+        c.pack(fill="x", pady=(0, 10))
+        g = c.body
+        g.columnconfigure(0, weight=1)
+        ui.section(g, "그밖에").grid(row=0, column=0, columnspan=2, sticky="w")
         self.dry_var = tk.BooleanVar(value=bool(self.s.get("dry")))
-        self._check(g, "연습 모드 — 인식만 하고 채팅으로 보내지 않습니다",
-                    self.dry_var, self.change_dry).grid(row=r, column=0,
-                                                        columnspan=2, sticky="w")
-        r += 1
+        ui.check(g, "연습 모드 — 인식만 하고 채팅으로 보내지 않습니다",
+                 self.dry_var, self.change_dry).grid(row=1, column=0, columnspan=2,
+                                                     sticky="w", pady=(8, 0))
         self.ov_var = tk.BooleanVar(value=bool(self.s.get("overlay", True)))
-        self._check(g, "내렸을 때 작은 표시창 보이기", self.ov_var,
-                    self.change_overlay).grid(row=r, column=0, columnspan=2,
-                                              sticky="w", pady=(4, 0))
-        r += 1
-        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
-                                            sticky="we", pady=12)
-        r += 1
+        ui.check(g, "내렸을 때 작은 표시창 보이기", self.ov_var,
+                 self.change_overlay).grid(row=2, column=0, columnspan=2,
+                                           sticky="w", pady=(2, 0))
 
-        # 게임 연결
-        section(g, "게임 조작 프로그램").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        self.cli_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_SMALL,
-                                anchor="w", justify="left", wraplength=380)
-        self.cli_lbl.grid(row=r, column=0, sticky="we", pady=(6, 0))
-        cb = tk.Frame(g, bg=CARD)
-        cb.grid(row=r, column=1, sticky="e", padx=(10, 0), pady=(6, 0))
-        Btn(cb, "다시 찾기", self.rescan_cli).pack(side="left")
-        self.cli_scan_btn = Btn(cb, "디스크에서 찾기", self.deep_scan_cli)
-        self.cli_scan_btn.pack(side="left", padx=(6, 0))
-        Btn(cb, "직접 지정", self.pick_cli).pack(side="left", padx=(6, 0))
-        self._paint_cli()
-        return c
-
-    def _check(self, parent, text, var, cmd):
-        return tk.Checkbutton(parent, text=text, variable=var, command=cmd,
-                              bg=CARD, fg=DIM, selectcolor="#23262f",
-                              activebackground=CARD, activeforeground=FG,
-                              bd=0, highlightthickness=0, font=F_BODY,
-                              anchor="w", cursor="hand2")
+        # 6) 게임 연결
+        c = ui.Card(col)
+        c.pack(fill="x", pady=(0, 4))
+        g = c.body
+        g.columnconfigure(0, weight=1)
+        ui.section(g, "게임 조작 프로그램").grid(row=0, column=0, sticky="w")
+        self.cli_lbl = ui.label(g, "", DIM, F_SMALL, wraplength=420, justify="left")
+        self.cli_lbl.grid(row=1, column=0, columnspan=3, sticky="we", pady=(8, 10))
+        ui.Button(g, "다시 찾기", self.rescan_cli, kind="quiet"
+                  ).grid(row=2, column=0, sticky="w")
+        self.cli_scan_btn = ui.Button(g, "디스크에서 찾기", self.deep_scan_cli,
+                                      kind="quiet")
+        self.cli_scan_btn.grid(row=2, column=1, sticky="w", padx=6)
+        ui.Button(g, "직접 지정", self.pick_cli, kind="quiet"
+                  ).grid(row=2, column=2, sticky="w")
+        return area
 
     def show_tab(self, key):
-        for k, b in self.tab_btns.items():
-            on = k == key
-            b.config(fg=FG if on else MUTE, bg=CARD if on else BG)
-        for k, p in self.panes.items():
+        for k, t in self.tab_btns.items():
+            t.kind = "ghost" if k == key else "quiet"
+            t._draw()
+        for p in self.panes.values():
             p.pack_forget()
         self.panes[key].pack(fill="both", expand=True)
 
@@ -478,19 +342,17 @@ class App:
         self._paint_hotkey()
 
     def _capture_tick(self):
-        """키 상태를 직접 읽어 조합을 알아낸다. Win 키까지 잡으려면 이 방법뿐이다."""
+        """키 상태를 직접 읽는다. Win 키까지 잡으려면 이 방법뿐이다."""
         if not self.capturing:
             return
         gaks = ctypes.windll.user32.GetAsyncKeyState
         if gaks(0x1B) & 0x8000 or time.time() > self._cap_until:      # Esc
             self.cancel_capture()
             return
-
         mods = [n for n in ("ctrl", "shift", "alt", "win")
                 if any(gaks(v) & 0x8000 for v in core.MODIFIERS[n])]
         key = next((n for n, vk in sorted(core.KEYS.items())
                     if gaks(vk) & 0x8000), None)
-
         if key is None:
             shown = "+".join(core.hotkey_label(m) for m in mods) or "키를 누르세요"
             self.hk_cap.config(text=shown + (" + …" if mods else ""))
@@ -512,9 +374,9 @@ class App:
         self._paint_state(self.engine.listening if self.engine else True)
 
     def _paint_hotkey(self):
-        label = core.hotkey_label(self.s.get("hotkey", "win+f9"))
-        self.hk_cap.config(text=label)
-        self.hk_pill.config(text=label)
+        lab = core.hotkey_label(self.s.get("hotkey", "win+f9"))
+        self.hk_cap.config(text=lab)
+        self.hk_pill.config(text=lab)
 
     # ------------------------------------------------------------ 엔진
     def _boot(self):
@@ -604,8 +466,7 @@ class App:
         frac = min(1.0, self.level * 12)          # rms 는 작아서 눈에 보이게 늘린다
         thr = None
         if self.engine:
-            t = max(self.engine.noise * float(self.s["noise_mult"]), 0.012)
-            thr = min(1.0, t * 12)
+            thr = min(1.0, self.engine.threshold() * 12)
         listening = self.engine.listening if self.engine else True
         if self.root.state() != "withdrawn":
             self.meter.paint(frac, thr, MINT if listening else MUTE)
@@ -698,7 +559,7 @@ class App:
         self._labels()
         core.save_settings(self.s)
         self.cal_lbl.config(
-            text="맞췄습니다. 원래 음량 %.3f -> 증폭 %.1f배, 최소 문턱 %.3f"
+            text="맞췄습니다. 원래 음량 %.3f → 증폭 %.1f배, 최소 문턱 %.3f"
                  % (peak, gain, low), fg=MINT)
 
     def change_mode(self, _=None):
@@ -836,9 +697,9 @@ class App:
     def _dl_show(self, on):
         if on:
             self.dl.grid(row=self.dl_row, column=0, columnspan=2,
-                         sticky="we", pady=(10, 0))
+                         sticky="we", pady=(12, 0))
             self.dl_lbl.grid(row=self.dl_row + 1, column=0, columnspan=2,
-                             sticky="we", pady=(4, 0))
+                             sticky="we", pady=(6, 0))
         else:
             self.dl.grid_remove()
             self.dl_lbl.grid_remove()
@@ -907,20 +768,24 @@ class App:
         o = tk.Toplevel(self.root)
         o.overrideredirect(True)                 # 제목줄 없는 납작한 창
         o.attributes("-topmost", True)
-        o.attributes("-alpha", 0.9)
-        o.configure(bg=LINE)
+        o.attributes("-alpha", 0.92)
+        o.configure(bg=BG)
         o.withdraw()
 
-        wrap = tk.Frame(o, bg="#111217", padx=10, pady=6)
-        wrap.pack(padx=1, pady=1)
+        shell = tk.Canvas(o, bg=BG, highlightthickness=0, bd=0,
+                          width=170, height=40)
+        shell.pack()
+        ui.rounded(shell, 0, 0, 169, 39, 12, fill=CARD, outline=LINE, width=1)
+        inner = tk.Frame(shell, bg=CARD)
+        shell.create_window(85, 20, window=inner)
 
-        self.o_dot = tk.Label(wrap, text="●", bg="#111217", fg=MINT,
+        self.o_dot = tk.Label(inner, text="●", bg=CARD, fg=MINT,
                               font=("Segoe UI", 11))
         self.o_dot.pack(side="left")
-        self.o_txt = tk.Label(wrap, text="듣는 중", bg="#111217", fg=FG,
+        self.o_txt = tk.Label(inner, text="듣는 중", bg=CARD, fg=FG,
                               font=("Malgun Gothic", 9, "bold"))
         self.o_txt.pack(side="left", padx=(6, 8))
-        self.o_meter = Meter(wrap, height=6, bg="#111217", width=46)
+        self.o_meter = ui.Bar(inner, height=6, bg=CARD, width=46)
         self.o_meter.pack(side="left")
 
         def press(e):
@@ -938,7 +803,7 @@ class App:
             else:
                 self.show()                       # 끌지 않고 딸깍 -> 창 열기
 
-        for w in (o, wrap, self.o_dot, self.o_txt, self.o_meter):
+        for w in (o, shell, inner, self.o_dot, self.o_txt, self.o_meter):
             w.bind("<Button-1>", press)
             w.bind("<B1-Motion>", drag)
             w.bind("<ButtonRelease-1>", release)
@@ -965,13 +830,10 @@ class App:
             self.overlay.withdraw()
 
     def _overlay_flash(self, text, dry=False):
-        """방금 나간 말을 작은 표시창에 잠깐 보여준다.
-
-        보내기 전 확인이 없으므로, 무엇이 나갔는지 창을 열지 않고 알 수 있어야 한다.
-        """
+        """방금 나간 말을 잠깐 보여준다. 보내기 전 확인이 없기 때문이다."""
         if self.overlay is None or not self.overlay.winfo_viewable():
             return
-        shown = text if len(text) <= 16 else text[:15] + "…"
+        shown = text if len(text) <= 14 else text[:13] + "…"
         self.o_dot.config(fg=AMBER if dry else MINT)
         self.o_txt.config(text=shown, fg=FG)
         self._flash_until = time.time() + 4
@@ -1062,8 +924,8 @@ def make_icon(on):
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    col = (110, 231, 168, 255) if on else (130, 136, 150, 255)
-    d.ellipse((2, 2, size - 2, size - 2), fill=(20, 21, 27, 255), outline=col, width=3)
+    col = (95, 214, 164, 255) if on else (120, 127, 140, 255)
+    d.ellipse((2, 2, size - 2, size - 2), fill=(15, 17, 21, 255), outline=col, width=3)
     d.rounded_rectangle((26, 16, 38, 38), radius=6, fill=col)      # 마이크 몸통
     d.arc((20, 28, 44, 46), start=0, end=180, fill=col, width=3)   # 받침
     d.line((32, 44, 32, 50), fill=col, width=3)

@@ -26,6 +26,7 @@ FILES = [
     "실행.bat",
     "src/core.py",
     "src/models.py",
+    "src/ui.py",
     "src/mabi_voice.pyw",
     "scripts/setup.bat",
     "scripts/setup_gpu.bat",

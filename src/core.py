@@ -19,7 +19,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 REPO = "Git-seokwon/mabi-voice-chat"
 
 
