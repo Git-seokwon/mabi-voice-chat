@@ -47,6 +47,22 @@ DEFAULTS = {
 }
 
 
+_mutex = None
+
+
+def claim_single_instance(name="mabi_voice_chat"):
+    """이미 돌고 있으면 False. 두 개가 동시에 들으면 채팅이 두 번씩 나간다.
+
+    이름 있는 뮤텍스는 프로세스가 죽으면 윈도우가 알아서 풀어 주므로,
+    강제 종료되어도 잠금이 남지 않는다.
+    """
+    global _mutex
+    ERROR_ALREADY_EXISTS = 183
+    k32 = ctypes.windll.kernel32
+    _mutex = k32.CreateMutexW(None, False, name)     # 핸들은 붙잡아 둔다
+    return k32.GetLastError() != ERROR_ALREADY_EXISTS
+
+
 def load_settings():
     s = dict(DEFAULTS)
     try:

@@ -56,6 +56,19 @@
 - 같은 글자만 반복되는 인식 실패
 - 5초 안에 같은 말이 두 번 잡힌 중복
 
+## 채팅이 두 번씩 나갈 때
+
+프로그램이 두 개 돌고 있는 것이다. 이제는 두 번째 실행이 스스로 거절하고
+안내창을 띄우지만, 그래도 의심되면 남아 있는 것을 확인한다.
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+  Select-Object ProcessId, CreationDate, CommandLine
+```
+
+`mabi_voice.pyw` 가 두 줄 이상 나오면 묵은 쪽을 `Stop-Process -Id <번호> -Force`
+로 내린다. 창이 안 보여도 배경에서 듣고 있을 수 있다.
+
 ## 구성
 
 | 파일 | 하는 일 |

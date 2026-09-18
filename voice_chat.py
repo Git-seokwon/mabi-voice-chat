@@ -50,6 +50,10 @@ def main():
     if "--dev" in args or "--dry" in args:
         pass                      # 이번 실행에만 적용. 설정 파일은 건드리지 않는다
 
+    if not core.claim_single_instance():
+        print("이미 실행 중입니다. 두 개가 동시에 들으면 채팅이 두 번씩 나갑니다.")
+        return
+
     engine = core.Engine(s, on_event=show)
     if not engine.start():
         return

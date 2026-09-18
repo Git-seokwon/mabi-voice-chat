@@ -173,19 +173,32 @@ class App:
 
     # ------------------------------------------------------------ 이벤트
     def _drain(self):
-        while True:
+        # 이 안에서 예외가 새면 화면만 죽고 엔진은 계속 채팅을 보낸다.
+        # 그런 반쪽 상태가 제일 위험하므로, 무슨 일이 있어도 되돌아온다.
+        try:
+            while True:
+                try:
+                    item = self.events.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    kind, text, meta = item
+                except (TypeError, ValueError):
+                    kind, text, meta = "error", "알 수 없는 이벤트: %r" % (item,), {}
+                self._append(kind, text, meta)
+                if kind == "listen":
+                    self._paint_state(meta.get("on", True))
+                if kind == "info" and text.startswith("마이크:"):
+                    self.info_lbl.config(text=text)
+                if kind == "info" and "준비 완료" in text:
+                    self._paint_state(self.engine.listening if self.engine else True)
+        except Exception as e:
             try:
-                kind, text, meta = self.events.get_nowait()
-            except queue.Empty:
-                break
-            self._append(kind, text, meta)
-            if kind == "listen":
-                self._paint_state(meta.get("on"))
-            if kind == "info" and text.startswith("마이크:"):
-                self.info_lbl.config(text=text)
-            if kind == "info" and "준비 완료" in text:
-                self._paint_state(self.engine.listening if self.engine else True)
-        self.root.after(50, self._drain)
+                self._append("error", "화면 갱신 오류: %s" % e, {})
+            except Exception:
+                pass
+        finally:
+            self.root.after(50, self._drain)
 
     def _append(self, kind, text, meta):
         stamp = __import__("time").strftime("%H:%M:%S")
@@ -329,4 +342,15 @@ def make_icon(on):
 
 
 if __name__ == "__main__":
+    if not core.claim_single_instance():
+        from tkinter import messagebox
+        r = tk.Tk()
+        r.withdraw()
+        messagebox.showwarning(
+            "마비노기 음성 채팅",
+            "이미 실행 중입니다.\n\n"
+            "두 개가 동시에 들으면 채팅이 두 번씩 나갑니다.\n"
+            "트레이 아이콘을 확인해 주세요.")
+        r.destroy()
+        sys.exit(0)
     App().run()
