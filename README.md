@@ -11,8 +11,15 @@
 말소리를 알아서 감지합니다. 말을 시작하면 녹음하고, 잠깐 조용해지면 한 마디가
 끝난 것으로 보고 글로 바꿔 보냅니다. 버튼을 누르고 있을 필요가 없습니다.
 
-<!-- 스크린샷 자리: docs/images/main.png  (메인 창) -->
-<!-- 스크린샷 자리: docs/images/overlay.png  (게임 위의 작은 표시창) -->
+<p align="center">
+  <img src="docs/images/main.png" width="520" alt="메인 창">
+</p>
+
+게임 위에는 작은 표시창만 남겨 둘 수 있습니다.
+
+<p align="center">
+  <img src="docs/images/overlay.png" width="380" alt="게임 위에 떠 있는 작은 표시창">
+</p>
 
 ## 필요한 것
 
@@ -59,6 +66,10 @@
 실제 숫자도 적히니, 말해도 초록이 주황에 닿지 않으면 마이크가 작은 것입니다.
 
 아래는 **기록** 과 **설정** 두 탭입니다.
+
+<p align="center">
+  <img src="docs/images/settings.png" width="520" alt="설정 탭">
+</p>
 
 | 설정 | 무엇 |
 |---|---|
