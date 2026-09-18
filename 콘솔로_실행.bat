@@ -1,4 +1,12 @@
 @echo off
-rem Same program, but with a console so errors are visible.
-"C:\Users\suck7\miniconda3\python.exe" "%~dp0mabi_voice.pyw"
+rem Same program with a console, so errors are visible.
+setlocal
+set ROOT=%~dp0
+set PY=%ROOT%runtime\python\python.exe
+if not exist "%PY%" (
+  echo Runtime is missing. Run setup.bat first.
+  pause
+  exit /b 1
+)
+"%PY%" "%ROOT%mabi_voice.pyw"
 pause
