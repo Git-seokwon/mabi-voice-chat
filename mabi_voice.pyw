@@ -337,6 +337,22 @@ class App:
         self._check(g, "내렸을 때 작은 표시창 보이기", self.ov_var,
                     self.change_overlay).grid(row=r, column=0, columnspan=2,
                                               sticky="w", pady=(4, 0))
+        r += 1
+        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
+                                            sticky="we", pady=12)
+        r += 1
+
+        # 게임 연결
+        section(g, "게임 조작 프로그램").grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        self.cli_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_SMALL,
+                                anchor="w", justify="left", wraplength=380)
+        self.cli_lbl.grid(row=r, column=0, sticky="we", pady=(6, 0))
+        cb = tk.Frame(g, bg=CARD)
+        cb.grid(row=r, column=1, sticky="e", padx=(10, 0), pady=(6, 0))
+        Btn(cb, "다시 찾기", self.rescan_cli).pack(side="left")
+        Btn(cb, "직접 지정", self.pick_cli).pack(side="left", padx=(6, 0))
+        self._paint_cli()
         return c
 
     def _check(self, parent, text, var, cmd):
@@ -553,6 +569,42 @@ class App:
         core.save_settings(self.s)
         if not self.s["overlay"]:
             self._overlay_show(False)
+
+    # ------------------------------------------------------------ 게임 연결
+    def _paint_cli(self):
+        p = core.cli_path(self.s)
+        if p:
+            self.cli_lbl.config(text=p, fg=DIM)
+        else:
+            self.cli_lbl.config(
+                text="찾지 못했습니다. 게임에서 'MM AI 에이전트 활성화' 를 켜면 "
+                     "깔립니다. 이미 켜 두셨다면 직접 지정해 주세요.", fg=AMBER)
+
+    def rescan_cli(self):
+        core.cli_path(self.s, rescan=True)
+        self._paint_cli()
+        ok, msg = core.game_status(self.s)
+        self.events.put(("info" if ok else "error", msg, {}))
+
+    def pick_cli(self):
+        from tkinter import filedialog
+        start = r"C:\Nexon\MabinogiMobile"
+        p = filedialog.askopenfilename(
+            parent=self.root,
+            title="MabinogiMobile_CLI.exe 를 골라 주세요",
+            initialdir=start if os.path.isdir(start) else "C:\\",
+            filetypes=[("MabinogiMobile_CLI", "MabinogiMobile_CLI.exe"),
+                       ("실행 파일", "*.exe")])
+        if not p:
+            return
+        if not os.path.basename(p).lower().startswith("mabinogimobile_cli"):
+            self.events.put(("error", "MabinogiMobile_CLI.exe 가 아닙니다: %s"
+                             % os.path.basename(p), {}))
+            return
+        if core.set_cli_path(p, self.s):
+            self._paint_cli()
+            ok, msg = core.game_status(self.s)
+            self.events.put(("info" if ok else "error", msg, {}))
 
     # ------------------------------------------------------------ 모델
     def _sel_model(self):

@@ -19,7 +19,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 # ---------------------------------------------------------------- CUDA 준비
@@ -90,26 +90,133 @@ def cuda_ready():
     return _cuda_ok, _cuda_note
 
 
-def find_cli():
-    """게임 CLI 위치. PATH 에 등록되어 있으면 그걸 쓰고, 없으면 흔한 자리를 본다.
+EXE = "MabinogiMobile_CLI.exe"
 
-    토글을 켜면 게임이 CLI 를 깔면서 PATH 에 등록해 준다. 사람마다 설치
-    드라이브가 다르므로 경로를 박아 두지 않는다. MABI_CLI 로 직접 지정할 수도 있다.
+
+def _reg_path_dirs():
+    """레지스트리에 적힌 PATH 를 직접 읽는다.
+
+    PATH 는 프로세스가 시작할 때 물려받는다. 게임이 토글을 켜며 PATH 에
+    등록해도, 이미 떠 있던 탐색기에서 실행한 프로그램은 옛 PATH 를 쥐고
+    있어서 찾지 못한다. 재부팅해야 풀리는 그 문제를 레지스트리를 직접
+    읽어 비켜간다.
     """
-    env = os.environ.get("MABI_CLI")
-    if env and os.path.isfile(env):
-        return env
-    found = shutil.which("MabinogiMobile_CLI")
-    if found:
-        return found
-    for drive in ("C:", "D:", "E:", "F:"):
-        p = drive + r"\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe"
-        if os.path.isfile(p):
+    import winreg
+    out = []
+    for root, sub in (
+            (winreg.HKEY_CURRENT_USER, r"Environment"),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+        try:
+            with winreg.OpenKey(root, sub) as k:
+                val, _ = winreg.QueryValueEx(k, "Path")
+            for p in str(val).split(";"):
+                p = os.path.expandvars(p.strip().strip('"'))
+                if p:
+                    out.append(p)
+        except Exception:
+            pass
+    return out
+
+
+def _reg_install_dirs():
+    """제거 항목에 적힌 '마비노기 모바일' 설치 위치. PATH 와 무관하다."""
+    import winreg
+    out = []
+    bases = (
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    )
+    for root, base in bases:
+        try:
+            with winreg.OpenKey(root, base) as bk:
+                for i in range(winreg.QueryInfoKey(bk)[0]):
+                    try:
+                        name = winreg.EnumKey(bk, i)
+                        with winreg.OpenKey(bk, name) as k:
+                            disp = str(winreg.QueryValueEx(k, "DisplayName")[0])
+                            if "마비노기" not in disp and "mabinogi" not in disp.lower():
+                                continue
+                            loc = str(winreg.QueryValueEx(k, "InstallLocation")[0])
+                            if loc.strip():
+                                out.append(loc.strip().strip('"'))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    return out
+
+
+def _drive_dirs():
+    """드라이브마다 흔한 설치 자리. 넥슨 런처는 설치 폴더를 고를 수 있다."""
+    import string
+    subs = (r"Nexon\MabinogiMobile",
+            r"Games\Nexon\MabinogiMobile",
+            r"Game\Nexon\MabinogiMobile",
+            r"Program Files\Nexon\MabinogiMobile",
+            r"Program Files (x86)\Nexon\MabinogiMobile",
+            r"MabinogiMobile")
+    out = []
+    for letter in string.ascii_uppercase:
+        root = "%s:\\" % letter
+        if not os.path.isdir(root):
+            continue
+        out += [os.path.join(root, s) for s in subs]
+    return out
+
+
+def find_cli(settings=None):
+    """게임 CLI 를 찾는다. 못 찾으면 None.
+
+    PATH 한 갈래만 믿지 않는다. 실제로 PATH 에 등록이 안 되어 있거나,
+    등록됐어도 프로세스가 옛 PATH 를 쥔 경우가 있다.
+    """
+    # 1) 사람이 직접 지정한 것이 가장 우선
+    for p in ((settings or {}).get("cli_path"), os.environ.get("MABI_CLI")):
+        if p and os.path.isfile(p):
             return p
-    return "MabinogiMobile_CLI.exe"        # 마지막 수단. 없으면 실행 때 알려준다
+    # 2) 지금 프로세스의 PATH
+    got = shutil.which("MabinogiMobile_CLI")
+    if got and os.path.isfile(got):
+        return got
+    # 3) 레지스트리의 PATH, 4) 설치 위치, 5) 드라이브 훑기
+    for d in _reg_path_dirs() + _reg_install_dirs() + _drive_dirs():
+        try:
+            p = os.path.join(d, EXE)
+            if os.path.isfile(p):
+                return p
+        except Exception:
+            continue
+    return None
 
 
-CLI = find_cli()
+_cli = None
+
+
+def cli_path(settings=None, rescan=False):
+    """찾은 CLI 경로. 한 번 찾으면 기억한다."""
+    global _cli
+    if rescan or _cli is None or not os.path.isfile(_cli or ""):
+        _cli = find_cli(settings)
+    return _cli
+
+
+def set_cli_path(path, settings=None):
+    """창에서 사람이 골라 준 경로를 쓴다."""
+    global _cli
+    if not path or not os.path.isfile(path):
+        return False
+    _cli = path
+    if settings is not None:
+        settings["cli_path"] = path
+        save_settings(settings)
+    return True
+
+
 SAMPLE_RATE = 16000
 FRAME = 480                   # 30ms
 CHAT_LIMIT = 50               # write_chat 한 줄 최대 글자수
@@ -211,6 +318,7 @@ DEFAULTS = {
     "hotkey": "win+f9",       # 듣기 켜고 끄기. 창 포커스와 무관하게 먹힌다
     "overlay": True,          # 창을 내리면 작은 표시창을 띄운다
     "overlay_pos": None,      # [x, y]. 끌어서 옮긴 자리를 기억한다
+    "cli_path": None,         # 게임 CLI 를 못 찾을 때 직접 지정한 경로
 }
 
 
@@ -250,15 +358,20 @@ def save_settings(s):
 
 # ---------------------------------------------------------------- 게임 CLI
 
-def cli(cmd, body=None):
-    args = [CLI, cmd]
+def cli(cmd, body=None, settings=None):
+    exe = cli_path(settings)
+    if not exe:
+        return 127, {"error": "cli_missing",
+                     "message": "게임 조작 프로그램(%s)을 찾지 못했습니다." % EXE}
+    args = [exe, cmd]
     if body is not None:
         args.append("base64:" + base64.b64encode(body.encode("utf-8")).decode("ascii"))
     try:
         p = subprocess.run(args, capture_output=True,
                            creationflags=subprocess.CREATE_NO_WINDOW)
     except FileNotFoundError:
-        return 127, {"error": "cli_missing", "message": "MabinogiMobile_CLI.exe 를 찾을 수 없습니다."}
+        return 127, {"error": "cli_missing",
+                     "message": "%s 를 실행할 수 없습니다." % exe}
     out = p.stdout.decode("utf-8", "replace").strip()
     try:
         return p.returncode, json.loads(out)
@@ -266,13 +379,15 @@ def cli(cmd, body=None):
         return p.returncode, {"_raw": out}
 
 
-def game_status():
+def game_status(settings=None):
     """(연결됐나, 사람이 읽을 설명)"""
-    rc, r = cli("status")
+    rc, r = cli("status", settings=settings)
     if isinstance(r, dict) and r.get("pipe") == "connected":
         return True, "게임 연결됨"
     if isinstance(r, dict) and r.get("error") == "cli_missing":
-        return False, r["message"]
+        return False, (r["message"] +
+                       " 게임에서 'MM AI 에이전트 활성화' 를 켜면 깔립니다. "
+                       "이미 켜 두셨다면 설정 탭에서 직접 지정해 주세요.")
     reason = (r or {}).get("reason") if isinstance(r, dict) else None
     if reason == "option_off":
         return False, "게임에서 'MM AI 에이전트 활성화' 를 켜 주세요"
@@ -508,7 +623,7 @@ class Engine:
             self._log_file(text)
             for ln in lines:
                 for _ in range(4):
-                    rc, r = cli("write_chat", ln)
+                    rc, r = cli("write_chat", ln, settings=self.s)
                     if isinstance(r, dict) and r.get("error") == "rate_limited":
                         time.sleep(float(r.get("retryAfterSeconds") or 3) + 0.3)
                         continue
@@ -642,7 +757,7 @@ class Engine:
             self.open_stream()
             return False
         if not self.s.get("dry"):
-            ok, msg = game_status()
+            ok, msg = game_status(self.s)
             self.on_event("info" if ok else "error", msg, {})
         threading.Thread(target=self._worker, daemon=True).start()
         threading.Thread(target=self._watch_key, daemon=True).start()
