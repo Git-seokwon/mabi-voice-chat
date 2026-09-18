@@ -158,7 +158,10 @@ class App:
 
     # ------------------------------------------------------------ 엔진
     def _boot(self):
-        self.engine = core.Engine(self.s, on_event=self.events.put,
+        # 엔진은 on_event(kind, text, meta) 로 세 인자를 준다.
+        # queue.put 을 그대로 넘기면 put(item, block, timeout) 으로 먹히므로 감싼다.
+        self.engine = core.Engine(self.s,
+                                  on_event=lambda k, t, m: self.events.put((k, t, m)),
                                   on_level=self._set_level)
         try:
             self.engine.start()
@@ -246,10 +249,10 @@ class App:
     def change_dry(self):
         self.s["dry"] = bool(self.dry_var.get())
         core.save_settings(self.s)
-        self.events.put(("listen" if False else "info",
-                         "연습 모드 %s" % ("켜짐 — 채팅으로 보내지 않습니다"
-                                       if self.s["dry"] else "꺼짐 — 이제 실제로 보냅니다"),
-                         {}))
+        msg = ("켜짐 — 채팅으로 보내지 않습니다" if self.s["dry"]
+               else "꺼짐 — 이제 실제로 보냅니다")
+        self.events.put(("listen", "연습 모드 " + msg, {"on": self.engine.listening
+                                                     if self.engine else True}))
 
     def change_noise(self, _=None):
         self.s["noise_mult"] = float(self.nm.get())
