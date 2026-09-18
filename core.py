@@ -19,7 +19,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.0.3"
+VERSION = "1.1.0"
 
 
 # ---------------------------------------------------------------- CUDA 준비
@@ -194,6 +194,67 @@ def find_cli(settings=None):
     return None
 
 
+# 훑을 때 들어가지 않는 폴더. 게임이 있을 리 없고 크기만 큰 곳들.
+_SKIP_DIRS = {
+    "windows", "programdata", "appdata", "$recycle.bin",
+    "system volume information", "recovery", "perflogs",
+    "node_modules", "__pycache__", "venv", ".venv", "site-packages",
+    "onedrive", "temp", "tmp", "cache", "winsxs", "assembly",
+}
+# 이 낱말이 들어간 폴더는 먼저 본다
+_HINTS = ("nexon", "mabinogi", "game", "games", "program files")
+
+
+def deep_find_cli(time_budget=25.0, on_progress=None):
+    r"""디스크를 직접 훑어 CLI 를 찾는다. 찾으면 경로, 못 찾으면 None.
+
+    전체 검색은 몇 분이 걸리므로 이렇게 줄인다.
+      - 얕은 곳부터 본다(너비 우선). 게임은 보통 깊지 않은 곳에 깔린다.
+      - 깊이 5칸까지만 들어간다.
+      - 윈도우 폴더나 캐시처럼 있을 리 없는 곳은 건너뛴다.
+      - 'nexon' 'mabinogi' 'game' 이 든 폴더를 먼저 본다.
+      - 정해 둔 시간이 지나면 멈춘다.
+    """
+    import string
+    from collections import deque as dq
+
+    deadline = time.time() + float(time_budget)
+    todo = dq((r, 0) for r in ("%s:\\" % c for c in string.ascii_uppercase)
+              if os.path.isdir(r))
+    seen = 0
+    while todo and time.time() < deadline:
+        d, depth = todo.popleft()
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        seen += 1
+        if on_progress and seen % 40 == 0:
+            on_progress(d)
+        for e in entries:
+            try:
+                if e.is_file(follow_symlinks=False) and e.name.lower() == EXE.lower():
+                    return e.path
+            except OSError:
+                continue
+        if depth >= 5:
+            continue
+        for e in entries:
+            try:
+                if not e.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            n = e.name.lower()
+            if n in _SKIP_DIRS or n.startswith((".", "$")):
+                continue
+            if any(h in n for h in _HINTS):
+                todo.appendleft((e.path, depth + 1))     # 그럴듯한 곳 먼저
+            else:
+                todo.append((e.path, depth + 1))
+    return None
+
+
 _cli = None
 
 
@@ -306,8 +367,35 @@ HALLUCINATIONS = (
     "MBC 뉴스", "KBS", "한글자막", "본 영상은", "다음 영상에서",
 )
 
-SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "settings.json")
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def data_dir():
+    r"""내 것(모델·설정·기록)을 두는 곳. 판을 올려도 살아남아야 한다.
+
+    1) MABI_DATA 환경변수
+    2) 프로그램 폴더에 이미 내 것이 있으면 그대로 쓴다. 예전부터 쓰던
+       사람의 설정과 모델을 잃지 않기 위한 배려다.
+    3) %LOCALAPPDATA%\mabi-voice-chat — 새로 깔면 이쪽. 프로그램 폴더를
+       통째로 덮어써도, 아예 다른 폴더에 풀어도 모델이 남는다.
+    """
+    env = os.environ.get("MABI_DATA")
+    if env:
+        return env
+    for mark in ("models", "settings.json"):
+        if os.path.exists(os.path.join(APP_DIR, mark)):
+            return APP_DIR
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = os.path.join(base, "mabi-voice-chat")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        return APP_DIR
+    return d
+
+
+def settings_path():
+    return os.path.join(data_dir(), "settings.json")
 DEFAULTS = {
     "device": None,           # None 이면 윈도우 기본 마이크
     "model": None,            # None 이면 첫 실행에 이 PC 에 맞는 것을 권한다
@@ -341,7 +429,7 @@ def claim_single_instance(name="mabi_voice_chat"):
 def load_settings():
     s = dict(DEFAULTS)
     try:
-        with open(SETTINGS_PATH, encoding="utf-8") as f:
+        with open(settings_path(), encoding="utf-8") as f:
             s.update(json.load(f))
     except Exception:
         pass
@@ -350,7 +438,7 @@ def load_settings():
 
 def save_settings(s):
     try:
-        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        with open(settings_path(), "w", encoding="utf-8") as f:
             json.dump(s, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
@@ -482,7 +570,7 @@ class Engine:
     def _log_file(self, text):
         if not self.s.get("log_to_file"):
             return
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sent.log")
+        path = os.path.join(data_dir(), "sent.log")
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write("%s\t%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text))

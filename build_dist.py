@@ -42,8 +42,10 @@ FORBIDDEN = ("settings.json", "sent.log", "runtime", "models/", "__pycache__",
 def main():
     out_dir = os.path.join(APP, "dist")
     os.makedirs(out_dir, exist_ok=True)
-    stem = "%s-%s" % (NAME, core.VERSION)
-    zip_path = os.path.join(out_dir, stem + ".zip")
+    # 압축 파일 이름에는 판번호를 넣지만, 안쪽 폴더 이름에는 넣지 않는다.
+    # 그래야 새 판을 옛 폴더에 그대로 덮어쓸 수 있다.
+    stem = NAME
+    zip_path = os.path.join(out_dir, "%s-%s.zip" % (NAME, core.VERSION))
 
     files = list(FILES)
     # LICENSE 는 정해지면 넣는다. 없어도 묶이게 둔다.
@@ -74,6 +76,7 @@ def main():
     print("   %d개 파일, %.1f KB" % (len(files), size / 1024))
     print()
     print("받는 사람은 압축을 풀고 실행.bat 을 누르면 됩니다.")
+    print("판을 올릴 때는 옛 폴더에 그대로 덮어써도 됩니다.")
     print("첫 실행에 파이썬(45MB)과 패키지(약 400MB), 그리고 고른 모델을 받습니다.")
     return 0
 

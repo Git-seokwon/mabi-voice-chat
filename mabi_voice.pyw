@@ -351,6 +351,8 @@ class App:
         cb = tk.Frame(g, bg=CARD)
         cb.grid(row=r, column=1, sticky="e", padx=(10, 0), pady=(6, 0))
         Btn(cb, "다시 찾기", self.rescan_cli).pack(side="left")
+        self.cli_scan_btn = Btn(cb, "디스크에서 찾기", self.deep_scan_cli)
+        self.cli_scan_btn.pack(side="left", padx=(6, 0))
         Btn(cb, "직접 지정", self.pick_cli).pack(side="left", padx=(6, 0))
         self._paint_cli()
         return c
@@ -585,6 +587,35 @@ class App:
         self._paint_cli()
         ok, msg = core.game_status(self.s)
         self.events.put(("info" if ok else "error", msg, {}))
+
+    def deep_scan_cli(self):
+        """설치 폴더를 바꿔 둔 사람을 위해 디스크를 직접 훑는다."""
+        self.cli_scan_btn.set_enabled(False)
+        self.cli_scan_btn.config(text="찾는 중...")
+        self.events.put(("info", "디스크를 훑고 있습니다. 최대 30초 걸립니다.", {}))
+
+        def work():
+            found = core.deep_find_cli(
+                time_budget=30.0,
+                on_progress=lambda d: self.root.after(
+                    0, lambda: self.cli_lbl.config(text="찾는 중: %s" % d[:60],
+                                                   fg=AMBER)))
+            self.root.after(0, self._deep_done, found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _deep_done(self, found):
+        self.cli_scan_btn.set_enabled(True)
+        self.cli_scan_btn.config(text="디스크에서 찾기")
+        if found and core.set_cli_path(found, self.s):
+            self.events.put(("info", "찾았습니다: %s" % found, {}))
+            ok, msg = core.game_status(self.s)
+            self.events.put(("info" if ok else "error", msg, {}))
+        else:
+            self.events.put(("error",
+                             "디스크에서도 찾지 못했습니다. '직접 지정' 으로 "
+                             "MabinogiMobile_CLI.exe 를 골라 주세요.", {}))
+        self._paint_cli()
 
     def pick_cli(self):
         from tkinter import filedialog

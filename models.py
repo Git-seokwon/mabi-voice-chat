@@ -11,7 +11,22 @@ import shutil
 import threading
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.path.join(APP_DIR, "models")
+
+
+def models_dir():
+    r"""모델을 두는 곳. 판을 올려도 다시 받지 않도록 프로그램 폴더 밖에 둔다.
+
+    MABI_MODELS 로 직접 정할 수 있고, 예전부터 프로그램 폴더에 받아 둔
+    사람은 그대로 쓴다. core.data_dir() 이 그 판단을 맡는다.
+    """
+    env = os.environ.get("MABI_MODELS")
+    if env:
+        return env
+    try:
+        import core
+        return os.path.join(core.data_dir(), "models")
+    except Exception:
+        return os.path.join(APP_DIR, "models")
 
 # 저장소 이름은 faster_whisper.utils._MODELS 와 같다. turbo 만 다른 곳에 있다.
 # size_mb 는 model.bin 기준 어림값. 실제 값은 받을 때 서버에서 다시 받아온다.
@@ -40,7 +55,7 @@ DEFAULT = "large-v3-turbo"
 
 
 def model_dir(name):
-    return os.path.join(MODELS_DIR, name)
+    return os.path.join(models_dir(), name)
 
 
 def is_installed(name):
@@ -158,7 +173,7 @@ def download(name, on_progress=None, on_log=None):
     r"""모델을 models\<이름>\ 에 받는다. on_progress(받은MB, 전체MB)."""
     if name not in BY_NAME:
         raise ValueError("모르는 모델: %s" % name)
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(models_dir(), exist_ok=True)
     dest = model_dir(name)
     log = on_log or (lambda m: None)
 
