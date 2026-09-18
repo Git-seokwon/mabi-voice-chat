@@ -117,6 +117,7 @@ class App:
         self._hiding = False        # withdraw 가 스스로 Unmap 을 부르는 걸 걸러낸다
         self.capturing = False      # 단축키를 받아 적는 중
         self._cap_until = 0
+        self._flash_until = 0       # 오버레이에 보낸 말을 잠깐 띄우는 시각
 
         self.root = tk.Tk()
         self.root.title("마비노기 음성 채팅 %s" % core.VERSION)
@@ -273,8 +274,12 @@ class App:
                                     if x["name"] == cur_model), 0))
         self.model_cb.grid(row=r, column=0, sticky="we", pady=(4, 0))
         self.model_cb.bind("<<ComboboxSelected>>", self.pick_model)
-        self.model_btn = Btn(g, "적용", self.apply_model)
-        self.model_btn.grid(row=r, column=1, sticky="e", padx=(10, 0), pady=(4, 0))
+        mb = tk.Frame(g, bg=CARD)
+        mb.grid(row=r, column=1, sticky="e", padx=(10, 0), pady=(4, 0))
+        self.model_del = Btn(mb, "지우기", self.delete_model)
+        self.model_del.pack(side="left", padx=(0, 6))
+        self.model_btn = Btn(mb, "적용", self.apply_model)
+        self.model_btn.pack(side="left")
         r += 1
         self.model_note = tk.Label(g, text="", bg=CARD, fg=MUTE, font=F_SMALL,
                                    anchor="w", justify="left")
@@ -302,6 +307,51 @@ class App:
         self.hk_hint = tk.Label(g, text="버튼을 누른 뒤 원하는 조합을 누르세요",
                                 bg=CARD, fg=MUTE, font=F_SMALL, anchor="w")
         self.hk_hint.grid(row=r, column=0, columnspan=2, sticky="we", pady=(5, 12))
+        r += 1
+        tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
+                                            sticky="we", pady=(0, 12))
+        r += 1
+
+        # 말하기 방식
+        section(g, "말하기 방식").grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        self.modes = [("auto", "자동 감지 — 말하면 알아서 잡습니다"),
+                      ("ptt", "눌러서 말하기 — 단축키로 시작하고 다시 눌러 끝냅니다")]
+        self.mode_var = tk.StringVar()
+        self.mode_cb = ttk.Combobox(g, state="readonly", textvariable=self.mode_var,
+                                    values=[t for _, t in self.modes],
+                                    style="D.TCombobox")
+        cur_mode = self.s.get("mode", "auto")
+        self.mode_cb.current(next((k for k, (v, _) in enumerate(self.modes)
+                                   if v == cur_mode), 0))
+        self.mode_cb.grid(row=r, column=0, columnspan=2, sticky="we", pady=(6, 12))
+        self.mode_cb.bind("<<ComboboxSelected>>", self.change_mode)
+        r += 1
+
+        # 낱말
+        section(g, "낱말 도움").grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        tk.Label(g, text="자주 쓰는 말", bg=CARD, fg=DIM, font=F_BODY,
+                 anchor="w").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        self.vocab_var = tk.StringVar(value=self.s.get("vocab", ""))
+        ve = tk.Entry(g, textvariable=self.vocab_var, bg=HOVER, fg=FG,
+                      relief="flat", insertbackground=FG, font=F_BODY)
+        ve.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
+        ve.bind("<Return>", self.change_vocab)
+        ve.bind("<FocusOut>", self.change_vocab)
+        r += 1
+        tk.Label(g, text="고쳐 쓰기", bg=CARD, fg=DIM, font=F_BODY,
+                 anchor="w").grid(row=r, column=0, sticky="w", pady=(6, 0))
+        self.repl_var = tk.StringVar(value=self.s.get("replace", ""))
+        re_ = tk.Entry(g, textvariable=self.repl_var, bg=HOVER, fg=FG,
+                       relief="flat", insertbackground=FG, font=F_BODY)
+        re_.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
+        re_.bind("<Return>", self.change_replace)
+        re_.bind("<FocusOut>", self.change_replace)
+        r += 1
+        tk.Label(g, text="쉼표로 나눕니다.  고쳐 쓰기는 «던젼>던전, 파뤼>파티» 꼴",
+                 bg=CARD, fg=MUTE, font=F_SMALL, anchor="w"
+                 ).grid(row=r, column=0, columnspan=2, sticky="we", pady=(5, 12))
         r += 1
         tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
                                             sticky="we", pady=(0, 12))
@@ -494,6 +544,8 @@ class App:
                 except (TypeError, ValueError):
                     kind, text, meta = "error", "알 수 없는 이벤트: %r" % (item,), {}
                 self._append(kind, text, meta)
+                if kind == "sent":
+                    self._overlay_flash(text, meta.get("dry"))
                 if kind == "listen":
                     self._paint_state(meta.get("on", True))
                 if kind == "info" and text.startswith("마이크:"):
@@ -534,9 +586,13 @@ class App:
 
     def _paint_state(self, on):
         on = bool(on)
+        rec = bool(self.engine and self.engine.recording)
+        if self.s.get("mode") == "ptt":
+            head = "녹음 중" if rec else ("눌러서 말하기" if on else "듣기 꺼짐")
+        else:
+            head = "듣고 있습니다" if on else "듣기 꺼짐"
         self.dot.config(fg=MINT if on else MUTE)
-        self.state_lbl.config(text="듣고 있습니다" if on else "듣기 꺼짐",
-                              fg=FG if on else DIM)
+        self.state_lbl.config(text=head, fg=FG if on else DIM)
         self.toggle_btn.config(text="듣기 끄기" if on else "듣기 켜기")
         self._paint_hotkey()
         self._overlay_paint(on)
@@ -560,6 +616,10 @@ class App:
                             float(self.s.get("gain", 1.0))))
         elif self.overlay is not None and self.overlay.winfo_viewable():
             self.o_meter.paint(frac, None, MINT if listening else MUTE)
+        if self.overlay is not None and self._flash_until:
+            if time.time() >= self._flash_until:
+                self._flash_until = 0
+                self._overlay_paint(self.engine.listening if self.engine else True)
         self.level *= 0.82
         self.root.after(60, self._tick_level)
 
@@ -640,6 +700,49 @@ class App:
         self.cal_lbl.config(
             text="맞췄습니다. 원래 음량 %.3f -> 증폭 %.1f배, 최소 문턱 %.3f"
                  % (peak, gain, low), fg=MINT)
+
+    def change_mode(self, _=None):
+        self.s["mode"] = self.modes[self.mode_cb.current()][0]
+        core.save_settings(self.s)
+        how = ("말하면 알아서 잡습니다" if self.s["mode"] == "auto"
+               else "단축키(%s)로 시작하고 다시 눌러 끝냅니다"
+                    % core.hotkey_label(self.s.get("hotkey", "win+f9")))
+        self.events.put(("info", "말하기 방식: " + how, {}))
+        self._paint_state(self.engine.listening if self.engine else True)
+
+    def change_vocab(self, _=None):
+        v = self.vocab_var.get().strip()
+        if v != self.s.get("vocab", ""):
+            self.s["vocab"] = v
+            core.save_settings(self.s)
+            self.events.put(("info", "낱말 %d개를 귀띔합니다"
+                             % len(v.replace(",", " ").split()), {}))
+
+    def change_replace(self, _=None):
+        v = self.repl_var.get().strip()
+        if v == self.s.get("replace", ""):
+            return
+        self.s["replace"] = v
+        core.save_settings(self.s)
+        m = core.parse_replace(v)
+        self.events.put(("info", "고쳐 쓰기 %d개: %s" % (
+            len(m), ", ".join("%s→%s" % kv for kv in list(m.items())[:4])), {}))
+
+    def delete_model(self):
+        from tkinter import messagebox
+        x = self._sel_model()
+        if not x["installed"]:
+            self.events.put(("error", "%s 는 이 폴더에 받아 둔 것이 아닙니다."
+                             % x["name"], {}))
+            return
+        mb = models.installed_size_mb(x["name"])
+        msg = ("%s 를 지울까요?\n\n%.0f MB 가 비워집니다.\n"
+               "다시 쓰려면 내려받아야 합니다." % (x["name"], mb))
+        if not messagebox.askyesno("모델 지우기", msg, parent=self.root):
+            return
+        if models.delete(x["name"]):
+            self.events.put(("info", "%s 를 지웠습니다 (%.0f MB)" % (x["name"], mb), {}))
+        self._refresh_models()
 
     def change_overlay(self):
         self.s["overlay"] = bool(self.ov_var.get())
@@ -727,6 +830,7 @@ class App:
     def pick_model(self, _=None):
         x = self._sel_model()
         self.model_btn.config(text="적용" if x["ready"] else "내려받기")
+        self.model_del.set_enabled(bool(x["installed"]))
         self.model_note.config(text=x["note"])
 
     def _dl_show(self, on):
@@ -860,12 +964,35 @@ class App:
         else:
             self.overlay.withdraw()
 
+    def _overlay_flash(self, text, dry=False):
+        """방금 나간 말을 작은 표시창에 잠깐 보여준다.
+
+        보내기 전 확인이 없으므로, 무엇이 나갔는지 창을 열지 않고 알 수 있어야 한다.
+        """
+        if self.overlay is None or not self.overlay.winfo_viewable():
+            return
+        shown = text if len(text) <= 16 else text[:15] + "…"
+        self.o_dot.config(fg=AMBER if dry else MINT)
+        self.o_txt.config(text=shown, fg=FG)
+        self._flash_until = time.time() + 4
+
+    def _overlay_state_text(self, listening):
+        if self.s.get("mode") == "ptt":
+            if self.engine and self.engine.recording:
+                return "녹음 중", MINT
+            return ("눌러서 말하기", DIM) if listening else ("꺼짐", MUTE)
+        return ("듣는 중", FG) if listening else ("꺼짐", MUTE)
+
     def _overlay_paint(self, listening):
         if self.overlay is None:
             return
-        self.o_dot.config(fg=MINT if listening else MUTE)
-        self.o_txt.config(text="듣는 중" if listening else "꺼짐",
-                          fg=FG if listening else MUTE)
+        if time.time() < self._flash_until:
+            return                      # 보낸 말을 보여주는 중에는 건드리지 않는다
+        txt, col = self._overlay_state_text(listening)
+        rec = bool(self.engine and self.engine.recording)
+        self.o_dot.config(fg=MINT if (listening and (rec or self.s.get("mode") != "ptt"))
+                          else (AMBER if listening else MUTE))
+        self.o_txt.config(text=txt, fg=col)
 
     # ------------------------------------------------------------ 트레이
     def _start_tray(self):

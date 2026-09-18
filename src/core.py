@@ -19,7 +19,8 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.2.3"
+VERSION = "1.3.0"
+REPO = "Git-seokwon/mabi-voice-chat"
 
 
 # ---------------------------------------------------------------- CUDA 준비
@@ -338,6 +339,34 @@ def hotkey_label(spec):
     return "+".join(names.get(p, p.upper()) for p in parts) or "Win+F9"
 
 
+# 위스퍼에 미리 귀띔하는 낱말. 이런 말이 나올 거라고 알려 주면 더 잘 알아듣는다.
+GAME_WORDS = (
+    "마비노기 던전 레이드 파티 길드 퀘스트 보스 사냥 채집 제작 강화 인챈트 "
+    "던바튼 티르코네일 이멘마하 반호르 콜헨 켈라 카브 페라 마스 알비 "
+    "상아탑 여신 모리안 나오 티르 밀레시안 에린 룬 엠블럼 장신구 "
+    "장궁병 검술사 마법사 힐러 격투가 음유시인 전사"
+)
+
+
+def build_prompt(extra=""):
+    """위스퍼에 넘길 귀띔 문장. 사용자가 적은 낱말을 뒤에 붙인다."""
+    extra = " ".join(str(extra).replace(",", " ").split())
+    return (GAME_WORDS + " " + extra).strip()
+
+
+def parse_replace(spec):
+    """'던젼>던전, 파뤼>파티' -> {'던젼': '던전', '파뤼': '파티'}"""
+    out = {}
+    for part in str(spec).split(","):
+        if ">" not in part:
+            continue
+        a, b = part.split(">", 1)
+        a, b = a.strip(), b.strip()
+        if a:
+            out[a] = b
+    return out
+
+
 # 위스퍼가 무음·잡음에 붙이는 흔한 헛문장들. 이런 건 보내지 않는다.
 HALLUCINATIONS = (
     "감사합니다", "시청해주셔서", "구독과 좋아요", "구독", "자막",
@@ -380,6 +409,11 @@ DEFAULTS = {
     "overlay": True,          # 창을 내리면 작은 표시창을 띄운다
     "overlay_pos": None,      # [x, y]. 끌어서 옮긴 자리를 기억한다
     "cli_path": None,         # 게임 CLI 를 못 찾을 때 직접 지정한 경로
+    "mode": "auto",           # auto = 말하면 감지, ptt = 단축키로 눌러서 말하기
+    "cpu_threads": 0,         # 0 이면 알아서. GPU 없이 쓸 때 속도를 좌우한다
+    "vocab": "",              # 자주 쓰는 낱말. 위스퍼에 미리 귀띔한다
+    "replace": "",            # 고쳐 쓰기. "던젼>던전, 파뤼>파티" 꼴
+    "check_update": True,     # 시작할 때 새 판이 있는지 본다
 }
 
 
@@ -472,9 +506,11 @@ def split_for_chat(text, limit=CHAT_LIMIT):
     return lines
 
 
-def clean(text):
+def clean(text, replace=None):
     """보낼 만한 말인지 판단해서 다듬는다. 버릴 것은 None."""
     text = " ".join(text.split()).strip()
+    for a, b in (replace or {}).items():
+        text = text.replace(a, b)
     if len(text) < 2:
         return None
     # '/' '#' 로 시작하면 게임이 명령으로 보고 거절한다. 떼어낸다.
@@ -488,6 +524,33 @@ def clean(text):
     if len(set(text.replace(" ", ""))) <= 1:    # 같은 글자 반복 = 인식 실패
         return None
     return text
+
+
+def latest_version():
+    """GitHub 에 올라온 최신 판 번호. 못 보면 None."""
+    import json as _json
+    import urllib.request
+    try:
+        url = "https://api.github.com/repos/%s/releases/latest" % REPO
+        req = urllib.request.Request(url, headers={"User-Agent": "mabi-voice-chat"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            tag = _json.loads(r.read().decode("utf-8")).get("tag_name") or ""
+        return tag.lstrip("vV") or None
+    except Exception:
+        return None
+
+
+def newer(a, b):
+    """판 번호 a 가 b 보다 새것인가."""
+    def parts(v):
+        out = []
+        for x in str(v).split("."):
+            try:
+                out.append(int(x))
+            except ValueError:
+                out.append(0)
+        return out
+    return parts(a) > parts(b)
 
 
 def input_devices():
@@ -529,6 +592,7 @@ class Engine:
 
         self.noise = 0.005
         self.raw_max = 0.0          # 증폭하기 전의 최대 음량
+        self.recording = False      # 눌러서 말하기로 녹음 중인가
         self.last_sent = ("", 0.0)
         self._buf = []
         self._pre = deque(maxlen=PRE_ROLL)
@@ -574,12 +638,19 @@ class Engine:
         if not ok:
             self.on_event("info", note, {})
         plans = ([("cuda", "int8_float16")] if ok else []) + [("cpu", "int8")]
+        # GPU 가 없으면 쓰레드 수가 속도를 좌우한다. 게임도 돌고 있으니
+        # 전부 쓰지는 않고 절반쯤만 쓴다.
+        want = int(self.s.get("cpu_threads") or 0)
+        if want <= 0:
+            want = max(4, min(8, (os.cpu_count() or 4) // 2))
         for device, compute in plans:
             try:
-                self.model = WhisperModel(target, device=device, compute_type=compute)
+                self.model = WhisperModel(target, device=device, compute_type=compute,
+                                          cpu_threads=want)
                 self.s["model"] = name
-                self.on_event("info", "모델 %s / %s(%s) 준비 완료 · %s"
-                              % (name, device, compute, where), {})
+                self.on_event("info", "모델 %s / %s(%s) 준비 완료 · %s%s"
+                              % (name, device, compute, where,
+                                 " · 쓰레드 %d" % want if device == "cpu" else ""), {})
                 if device == "cpu" and name in ("medium", "large-v3",
                                                 "large-v3-turbo"):
                     self.on_event("error",
@@ -612,6 +683,16 @@ class Engine:
             frame = np.clip(frame * gain, -1.0, 1.0)
         rms = float(np.sqrt(np.mean(frame ** 2)) + 1e-9)
         self.on_level(rms)
+
+        if self.s.get("mode") == "ptt":
+            # 눌러서 말하기: 단축키를 누른 동안에만 모은다. 소리 크기는 안 본다.
+            if self.recording:
+                self._buf.append(frame)
+                if len(self._buf) * FRAME / SAMPLE_RATE >= MAX_SEC:
+                    self.stop_record()
+            else:
+                self._pre.append(frame)
+            return
 
         if not self._in_speech:
             # 조용할 때의 소리를 소음 기준선으로 천천히 따라간다
@@ -657,14 +738,15 @@ class Engine:
             try:
                 segments, _ = self.model.transcribe(
                     audio, language="ko", beam_size=1, vad_filter=True,
-                    condition_on_previous_text=False)
+                    condition_on_previous_text=False,
+                    initial_prompt=build_prompt(self.s.get("vocab", "")))
                 raw = " ".join(s.text.strip() for s in segments).strip()
             except Exception as e:
                 self.on_event("error", "인식 실패: %s" % str(e)[:80], {})
                 continue
             took = time.time() - t0
 
-            text = clean(raw)
+            text = clean(raw, parse_replace(self.s.get("replace", "")))
             meta = {"sec": sec, "took": took, "raw": raw}
             if not text:
                 self.on_event("dropped", raw or "빈 결과", meta)
@@ -740,7 +822,7 @@ class Engine:
                 # PeekMessage 로 받아야 중단 요청을 확인할 틈이 생긴다
                 if u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
                     if msg.message == WM_HOTKEY:
-                        self.set_listening(not self.listening)
+                        self.hotkey_pressed()
                 else:
                     time.sleep(0.03)
         finally:
@@ -761,13 +843,43 @@ class Engine:
         while not self.stop_flag.is_set() and not self.hotkey_restart.is_set():
             now = bool(gaks(key) & 0x8000) and all(held(g) for g in mods)
             if now and not down:
-                self.set_listening(not self.listening)
+                self.hotkey_pressed()
                 if uses_win:
                     # Win 을 떼는 순간 시작 메뉴가 열리는 걸 막는다.
                     u32.keybd_event(VK_CONTROL, 0, 0, 0)
                     u32.keybd_event(VK_CONTROL, 0, 2, 0)
             down = now
             time.sleep(0.03)
+
+    def start_record(self):
+        if self.recording or not self.listening:
+            return
+        self._buf = list(self._pre)          # 첫 음절이 잘리지 않게
+        self._pre.clear()
+        self.recording = True
+        self.on_event("listen", "녹음 중", {"on": True, "rec": True})
+
+    def stop_record(self):
+        if not self.recording:
+            return
+        self.recording = False
+        audio = np.concatenate(self._buf) if self._buf else np.zeros(0, "float32")
+        self._buf = []
+        if len(audio) / SAMPLE_RATE >= MIN_SEC:
+            self.jobs.put(audio)
+            self.on_event("listen", "녹음 끝", {"on": True, "rec": False})
+        else:
+            self.on_event("listen", "너무 짧습니다", {"on": True, "rec": False})
+
+    def toggle_record(self):
+        self.stop_record() if self.recording else self.start_record()
+
+    def hotkey_pressed(self):
+        """단축키가 눌렸을 때. 방식에 따라 하는 일이 다르다."""
+        if self.s.get("mode") == "ptt":
+            self.toggle_record()
+        else:
+            self.set_listening(not self.listening)
 
     def threshold(self):
         """지금 말소리로 인정하는 문턱."""
@@ -786,6 +898,7 @@ class Engine:
         self.listening = bool(on)
         if not self.listening:                   # 듣기를 끄면 모으던 말은 버린다
             self._in_speech = False
+            self.recording = False
             self._buf = []
         self.on_event("listen", "듣기 켜짐" if self.listening else "듣기 꺼짐",
                       {"on": self.listening})
@@ -830,8 +943,17 @@ class Engine:
             self.on_event("info" if ok else "error", msg, {})
         threading.Thread(target=self._worker, daemon=True).start()
         threading.Thread(target=self._watch_key, daemon=True).start()
+        if self.s.get("check_update", True):
+            threading.Thread(target=self._check_update, daemon=True).start()
         self.open_stream()
         return True
+
+    def _check_update(self):
+        got = latest_version()
+        if got and newer(got, VERSION):
+            self.on_event("info",
+                          "새 판 %s 이 나왔습니다. github.com/%s/releases/latest"
+                          % (got, REPO), {})
 
     def shutdown(self):
         self.stop_flag.set()
