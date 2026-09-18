@@ -19,7 +19,6 @@ NAME = "mabi-voice-chat"
 # 배포본에 들어갈 것. 여기 없는 것은 안 들어간다.
 FILES = [
     "README.md",
-    "docs/DEVELOPING.md",
     "requirements.txt",
     "실행.bat",
     "src/core.py",
