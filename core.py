@@ -9,6 +9,7 @@ import ctypes
 import json
 import os
 import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -17,7 +18,27 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-CLI = r"C:\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe"
+
+def find_cli():
+    """게임 CLI 위치. PATH 에 등록되어 있으면 그걸 쓰고, 없으면 흔한 자리를 본다.
+
+    토글을 켜면 게임이 CLI 를 깔면서 PATH 에 등록해 준다. 사람마다 설치
+    드라이브가 다르므로 경로를 박아 두지 않는다. MABI_CLI 로 직접 지정할 수도 있다.
+    """
+    env = os.environ.get("MABI_CLI")
+    if env and os.path.isfile(env):
+        return env
+    found = shutil.which("MabinogiMobile_CLI")
+    if found:
+        return found
+    for drive in ("C:", "D:", "E:", "F:"):
+        p = drive + r"\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe"
+        if os.path.isfile(p):
+            return p
+    return "MabinogiMobile_CLI.exe"        # 마지막 수단. 없으면 실행 때 알려준다
+
+
+CLI = find_cli()
 SAMPLE_RATE = 16000
 FRAME = 480                   # 30ms
 CHAT_LIMIT = 50               # write_chat 한 줄 최대 글자수
@@ -99,6 +120,7 @@ def hotkey_label(spec):
              "shift": "Shift", "alt": "Alt"}
     parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
     return "+".join(names.get(p, p.upper()) for p in parts) or "Win+F9"
+
 
 # 위스퍼가 무음·잡음에 붙이는 흔한 헛문장들. 이런 건 보내지 않는다.
 HALLUCINATIONS = (
