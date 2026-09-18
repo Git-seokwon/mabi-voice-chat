@@ -19,7 +19,7 @@ from collections import deque
 import numpy as np
 import sounddevice as sd
 
-VERSION = "1.1.2"
+VERSION = "1.2.0"
 
 
 # ---------------------------------------------------------------- CUDA 준비
@@ -402,6 +402,8 @@ DEFAULTS = {
     "model": None,            # None 이면 첫 실행에 이 PC 에 맞는 것을 권한다
     "dry": False,             # True 면 인식만 하고 보내지 않는다
     "noise_mult": 3.0,        # 주변 소음의 몇 배를 말소리로 볼지
+    "gain": 1.0,              # 입력 증폭. 마이크가 작으면 올린다
+    "min_level": 0.012,       # 문턱의 최소값. 작은 마이크는 이걸 낮춰야 한다
     "hang_sec": 0.8,          # 이만큼 조용하면 말이 끝난 것으로 본다
     "log_to_file": True,
     "hotkey": "win+f9",       # 듣기 켜고 끄기. 창 포커스와 무관하게 먹힌다
@@ -560,6 +562,7 @@ class Engine:
         self.hotkey_restart = threading.Event()   # 단축키를 바꾸면 다시 등록한다
 
         self.noise = 0.005
+        self.raw_max = 0.0          # 증폭하기 전의 최대 음량
         self.last_sent = ("", 0.0)
         self._buf = []
         self._pre = deque(maxlen=PRE_ROLL)
@@ -637,6 +640,11 @@ class Engine:
     # --- 마이크 콜백
     def _on_audio(self, indata, frames, time_info, status):
         frame = indata[:, 0].copy()
+        # 증폭 전의 크기를 따로 남긴다. '자동 맞추기' 가 이 값을 본다.
+        self.raw_max = max(self.raw_max, float(np.abs(frame).max()))
+        gain = float(self.s.get("gain", 1.0))
+        if gain != 1.0:
+            frame = np.clip(frame * gain, -1.0, 1.0)
         rms = float(np.sqrt(np.mean(frame ** 2)) + 1e-9)
         self.on_level(rms)
 
@@ -645,7 +653,8 @@ class Engine:
             self.noise = 0.995 * self.noise + 0.005 * rms
             self._pre.append(frame)
 
-        threshold = max(self.noise * float(self.s["noise_mult"]), 0.012)
+        threshold = max(self.noise * float(self.s["noise_mult"]),
+                        float(self.s.get("min_level", 0.012)))
         if rms > threshold:
             self._loud += 1
             self._quiet = 0
@@ -801,6 +810,19 @@ class Engine:
                     u32.keybd_event(VK_CONTROL, 0, 2, 0)
             down = now
             time.sleep(0.03)
+
+    def threshold(self):
+        """지금 말소리로 인정하는 문턱."""
+        return max(self.noise * float(self.s["noise_mult"]),
+                   float(self.s.get("min_level", 0.012)))
+
+    def suggest_gain(self, target=0.35):
+        """방금 들어온 소리를 보고 알맞은 증폭을 셈한다. (증폭, 원래최대)"""
+        peak = self.raw_max
+        if peak < 1e-4:
+            return None, peak
+        g = max(1.0, min(20.0, target / peak))
+        return round(g, 1), peak
 
     def set_listening(self, on):
         self.listening = bool(on)

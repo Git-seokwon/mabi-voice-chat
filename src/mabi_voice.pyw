@@ -188,6 +188,7 @@ class App:
         self.meter.pack(fill="x")
         self.meter_lbl = tk.Label(pad, text="초록은 지금 음량, 주황은 말소리로 보는 문턱",
                                   bg=CARD, fg=MUTE, font=F_SMALL, anchor="w")
+        # 마이크가 작은지 눈으로 알 수 있게 실제 값도 적는다
         self.meter_lbl.pack(fill="x", pady=(4, 0))
 
         # ---- 탭
@@ -323,6 +324,30 @@ class App:
         self.hs.set(float(self.s.get("hang_sec", 0.8)))
         self.hs.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
         r += 1
+
+        self.gn_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_BODY, anchor="w")
+        self.gn_lbl.grid(row=r, column=0, sticky="w", pady=(6, 0))
+        self.gn = ttk.Scale(g, from_=1.0, to=20.0, orient="horizontal",
+                            command=self.change_gain, style="D.Horizontal.TScale")
+        self.gn.set(float(self.s.get("gain", 1.0)))
+        self.gn.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
+        r += 1
+
+        self.ml_lbl = tk.Label(g, text="", bg=CARD, fg=DIM, font=F_BODY, anchor="w")
+        self.ml_lbl.grid(row=r, column=0, sticky="w", pady=(6, 0))
+        self.ml = ttk.Scale(g, from_=0.001, to=0.05, orient="horizontal",
+                            command=self.change_minlevel, style="D.Horizontal.TScale")
+        self.ml.set(float(self.s.get("min_level", 0.012)))
+        self.ml.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(6, 0))
+        r += 1
+
+        self.cal_btn = Btn(g, "마이크 자동 맞추기", self.calibrate)
+        self.cal_btn.grid(row=r, column=0, sticky="w", pady=(10, 0))
+        self.cal_lbl = tk.Label(g, text="마이크가 작아 인식이 안 되면 이걸 누른다",
+                                bg=CARD, fg=MUTE, font=F_SMALL, anchor="w",
+                                wraplength=300, justify="left")
+        self.cal_lbl.grid(row=r, column=1, sticky="we", padx=(12, 0), pady=(10, 0))
+        r += 1
         tk.Frame(g, bg=LINE, height=1).grid(row=r, column=0, columnspan=2,
                                             sticky="we", pady=12)
         r += 1
@@ -375,10 +400,12 @@ class App:
     def _labels(self):
         # ttk.Scale 은 set() 하는 순간 command 를 부른다. 창을 만드는 도중이라
         # 라벨이 아직 없을 수 있으니 조용히 넘긴다.
-        if not hasattr(self, "hs_lbl"):
+        if not hasattr(self, "ml_lbl"):
             return
         self.nm_lbl.config(text="민감도  소음의 %.1f배" % float(self.nm.get()))
         self.hs_lbl.config(text="말끝 기다림  %.1f초" % float(self.hs.get()))
+        self.gn_lbl.config(text="입력 증폭  %.1f배" % float(self.gn.get()))
+        self.ml_lbl.config(text="최소 문턱  %.3f" % float(self.ml.get()))
 
     # ------------------------------------------------------------ 단축키 받아 적기
     def start_capture(self):
@@ -529,6 +556,11 @@ class App:
         listening = self.engine.listening if self.engine else True
         if self.root.state() != "withdrawn":
             self.meter.paint(frac, thr, MINT if listening else MUTE)
+            if self.engine:
+                self.meter_lbl.config(
+                    text="지금 %.3f · 문턱 %.3f · 증폭 %.1f배"
+                         % (self.level, self.engine.threshold(),
+                            float(self.s.get("gain", 1.0))))
         elif self.overlay is not None and self.overlay.winfo_viewable():
             self.o_meter.paint(frac, None, MINT if listening else MUTE)
         self.level *= 0.82
@@ -565,6 +597,54 @@ class App:
         self.s["hang_sec"] = float(self.hs.get())
         self._labels()
         core.save_settings(self.s)
+
+    def change_gain(self, _=None):
+        self.s["gain"] = float(self.gn.get())
+        self._labels()
+        core.save_settings(self.s)
+
+    def change_minlevel(self, _=None):
+        self.s["min_level"] = float(self.ml.get())
+        self._labels()
+        core.save_settings(self.s)
+
+    def calibrate(self):
+        """3초 동안 말하게 하고, 들어온 크기를 보고 증폭과 문턱을 맞춘다."""
+        if not self.engine:
+            return
+        self.cal_btn.set_enabled(False)
+        self.engine.raw_max = 0.0
+        self._cal_left = 3
+        self.cal_lbl.config(text="지금 평소 말투로 말해 주세요... 3", fg=AMBER)
+        self.root.after(1000, self._cal_tick)
+
+    def _cal_tick(self):
+        self._cal_left -= 1
+        if self._cal_left > 0:
+            self.cal_lbl.config(text="지금 평소 말투로 말해 주세요... %d" % self._cal_left)
+            self.root.after(1000, self._cal_tick)
+            return
+        gain, peak = self.engine.suggest_gain()
+        self.cal_btn.set_enabled(True)
+        if gain is None:
+            self.cal_lbl.config(
+                text="소리가 거의 들어오지 않았습니다. 윈도우 소리 설정에서 "
+                     "마이크 음소거와 입력 볼륨을 확인해 주세요.", fg=RED)
+            return
+        self.gn.set(gain)
+        self.s["gain"] = gain
+        # 증폭이 음량을 표준 수준으로 끌어올리므로 문턱은 기본값 0.012 로
+        # 되돌린다. 다만 증폭을 최대로 걸어도 목표에 못 미치는 아주 작은
+        # 마이크라면, 못 미친 만큼 문턱도 같이 낮춘다.
+        reached = peak * gain
+        low = round(0.012 * max(0.25, min(1.0, reached / 0.35)), 4)
+        self.ml.set(low)
+        self.s["min_level"] = low
+        self._labels()
+        core.save_settings(self.s)
+        self.cal_lbl.config(
+            text="맞췄습니다. 원래 음량 %.3f -> 증폭 %.1f배, 최소 문턱 %.3f"
+                 % (peak, gain, low), fg=MINT)
 
     def change_overlay(self):
         self.s["overlay"] = bool(self.ov_var.get())
