@@ -132,7 +132,7 @@ SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "settings.json")
 DEFAULTS = {
     "device": None,           # None 이면 윈도우 기본 마이크
-    "model": "large-v3",
+    "model": None,            # None 이면 첫 실행에 이 PC 에 맞는 것을 권한다
     "dry": False,             # True 면 인식만 하고 보내지 않는다
     "noise_mult": 3.0,        # 주변 소음의 몇 배를 말소리로 볼지
     "hang_sec": 0.8,          # 이만큼 조용하면 말이 끝난 것으로 본다
@@ -303,19 +303,51 @@ class Engine:
             pass
 
     # --- 모델
-    def load_model(self):
+    def _model_target(self, name):
+        """(엔진에 넘길 값, 설명). 없으면 (None, 이유)."""
+        import models
+        if models.is_installed(name):
+            return models.model_dir(name), "models 폴더"
+        # 앱 폴더에 없더라도 허깅페이스 캐시에 이미 있으면 그걸 쓴다.
+        # 3GB 를 다시 받게 하지 않기 위한 배려다.
+        try:
+            from faster_whisper import WhisperModel
+            WhisperModel(name, device="cpu", compute_type="int8",
+                         local_files_only=True)
+            return name, "허깅페이스 캐시"
+        except Exception:
+            return None, "아직 받지 않음"
+
+    def load_model(self, name=None):
         from faster_whisper import WhisperModel
-        name = self.s["model"]
+        name = name or self.s["model"]
+        target, where = self._model_target(name)
+        if target is None:
+            self.on_event("error",
+                          "모델 %s 을 아직 받지 않았습니다. 창에서 내려받아 주세요." % name, {})
+            return None
         for device, compute in (("cuda", "int8_float16"), ("cpu", "int8")):
             try:
-                self.model = WhisperModel(name, device=device, compute_type=compute)
-                self.on_event("info", "모델 %s / %s(%s) 준비 완료" % (name, device, compute), {})
+                self.model = WhisperModel(target, device=device, compute_type=compute)
+                self.s["model"] = name
+                self.on_event("info", "모델 %s / %s(%s) 준비 완료 · %s"
+                              % (name, device, compute, where), {})
                 return device
             except Exception as e:
                 self.on_event("info", "%s 사용 불가: %s"
                               % (device, str(e).splitlines()[0][:90]), {})
         self.on_event("error", "모델을 올리지 못했습니다.", {})
         return None
+
+    def reload_model(self, name):
+        """돌아가는 중에 모델을 갈아 끼운다. 듣기는 잠깐 멈춘다."""
+        was = self.listening
+        self.set_listening(False)
+        old, self.model = self.model, None
+        del old
+        ok = self.load_model(name) is not None
+        self.set_listening(was and ok)
+        return ok
 
     # --- 마이크 콜백
     def _on_audio(self, indata, frames, time_info, status):
@@ -358,6 +390,8 @@ class Engine:
             try:
                 audio = self.jobs.get(timeout=0.3)
             except queue.Empty:
+                continue
+            if self.model is None:          # 모델을 아직 안 받았으면 흘려보낸다
                 continue
             sec = len(audio) / SAMPLE_RATE
             t0 = time.time()
@@ -503,7 +537,19 @@ class Engine:
             self.stream = None
 
     def start(self):
+        import models
+        if not self.s.get("model"):
+            # 첫 실행. 이 PC 형편에 맞는 것을 골라 권한다.
+            pick, why = models.recommend()
+            self.s["model"] = pick
+            save_settings(self.s)
+            self.on_event("info", "모델을 %s 로 골랐습니다 — %s" % (pick, why), {})
         if self.load_model() is None:
+            # 모델이 없으면 마이크는 열어 두고 기다린다. 창에서 받으면 바로 쓴다.
+            self.on_event("info", "모델을 받은 뒤에 인식이 시작됩니다.", {})
+            threading.Thread(target=self._worker, daemon=True).start()
+            threading.Thread(target=self._watch_key, daemon=True).start()
+            self.open_stream()
             return False
         if not self.s.get("dry"):
             ok, msg = game_status()

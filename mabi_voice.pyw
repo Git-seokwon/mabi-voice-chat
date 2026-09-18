@@ -14,6 +14,7 @@ from tkinter import ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import core
+import models
 
 BG = "#1e1f26"
 FG = "#e6e6ea"
@@ -144,14 +145,39 @@ class App:
         self.hs.set(float(self.s.get("hang_sec", 0.8)))
         self.hs.grid(row=3, column=2, columnspan=4, sticky="we", padx=(8, 0))
 
+        tk.Label(cfg, text="모델", bg=BG, fg=SUB,
+                 font=("Malgun Gothic", 9)).grid(row=5, column=0, sticky="w",
+                                                 pady=(8, 0))
+        self.model_rows = models.catalog_rows()
+        self.model_var = tk.StringVar()
+        self.model_cb = ttk.Combobox(cfg, state="readonly", width=34,
+                                     textvariable=self.model_var,
+                                     values=[r["text"] for r in self.model_rows])
+        cur_model = self.s.get("model") or models.DEFAULT
+        self.model_cb.current(next((k for k, r in enumerate(self.model_rows)
+                                    if r["name"] == cur_model), 0))
+        self.model_cb.grid(row=5, column=1, columnspan=2, sticky="we",
+                           padx=(8, 0), pady=(8, 0))
+        self.model_cb.bind("<<ComboboxSelected>>", self.pick_model)
+        self.model_btn = tk.Button(cfg, text="적용", command=self.apply_model,
+                                   bg=PANEL, fg=FG, relief="flat", bd=0,
+                                   activebackground="#333644", cursor="hand2",
+                                   font=("Malgun Gothic", 9), padx=10, pady=2)
+        self.model_btn.grid(row=5, column=3, sticky="e", padx=(8, 0), pady=(8, 0))
+
+        self.dl = ttk.Progressbar(cfg, mode="determinate", maximum=100)
+        self.dl_lbl = tk.Label(cfg, text="", bg=BG, fg=SUB,
+                               font=("Malgun Gothic", 8), anchor="w")
+        # 내려받는 동안만 보인다 (_dl_show 가 붙이고 뗀다)
+
         tk.Label(cfg, text="단축키", bg=BG, fg=SUB,
-                 font=("Malgun Gothic", 9)).grid(row=4, column=0, sticky="w",
+                 font=("Malgun Gothic", 9)).grid(row=6, column=0, sticky="w",
                                                  pady=(6, 0))
         self.hk_var = tk.StringVar(value=self.s.get("hotkey", "win+f9"))
         hk = tk.Entry(cfg, textvariable=self.hk_var, width=12, bg=PANEL, fg=FG,
                       relief="flat", insertbackground=FG,
                       font=("Malgun Gothic", 9))
-        hk.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+        hk.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
         hk.bind("<Return>", self.change_hotkey)
         hk.bind("<FocusOut>", self.change_hotkey)
 
@@ -160,7 +186,7 @@ class App:
                        command=self.change_overlay, bg=BG, fg=FG, selectcolor=PANEL,
                        activebackground=BG, activeforeground=FG, bd=0,
                        highlightthickness=0, font=("Malgun Gothic", 9)
-                       ).grid(row=4, column=2, columnspan=3, sticky="w",
+                       ).grid(row=6, column=2, columnspan=3, sticky="w",
                               padx=(8, 0), pady=(6, 0))
         cfg.columnconfigure(3, weight=1)
 
@@ -174,6 +200,7 @@ class App:
                   cursor="hand2").pack(side="right")
 
         self._labels()
+        self.pick_model()
 
     def _labels(self):
         self.nm_lbl.config(text="민감도  소음의 %.1f배" % self.nm.get())
@@ -304,6 +331,85 @@ class App:
         self.s["hang_sec"] = float(self.hs.get())
         self._labels()
         core.save_settings(self.s)
+
+    # ------------------------------------------------------------ 모델
+    def _sel_model(self):
+        return self.model_rows[self.model_cb.current()]
+
+    def _refresh_models(self):
+        keep = self._sel_model()["name"]
+        self.model_rows = models.catalog_rows()
+        self.model_cb.configure(values=[r["text"] for r in self.model_rows])
+        self.model_cb.current(next((k for k, r in enumerate(self.model_rows)
+                                    if r["name"] == keep), 0))
+        self.pick_model()
+
+    def pick_model(self, _=None):
+        r = self._sel_model()
+        self.model_btn.config(text="적용" if r["ready"] else "내려받기")
+        self.events.put(("info", "%s — %s" % (r["name"], r["note"]), {}))
+
+    def _dl_show(self, on):
+        if on:
+            self.dl.grid(row=7, column=0, columnspan=4, sticky="we", pady=(8, 0))
+            self.dl_lbl.grid(row=8, column=0, columnspan=4, sticky="we")
+        else:
+            self.dl.grid_remove()
+            self.dl_lbl.grid_remove()
+
+    def apply_model(self):
+        r = self._sel_model()
+        name = r["name"]
+        if r["ready"]:
+            self.model_btn.config(state="disabled", text="바꾸는 중")
+            threading.Thread(target=self._swap_model, args=(name,),
+                             daemon=True).start()
+            return
+        self.model_btn.config(state="disabled", text="받는 중")
+        self._dl_show(True)
+        self.dl["value"] = 0
+        self.dl_lbl.config(text="%s 준비 중..." % name)
+        threading.Thread(target=self._download_model, args=(name,),
+                         daemon=True).start()
+
+    def _download_model(self, name):
+        def prog(done, total):
+            # 콜백은 다른 스레드에서 온다. 화면은 메인 스레드에서만 만진다.
+            self.root.after(0, self._dl_paint, done, total)
+        try:
+            models.download(name, on_progress=prog,
+                            on_log=lambda m: self.events.put(("info", m, {})))
+        except Exception as e:
+            self.events.put(("error", "내려받기 실패: %s" % str(e)[:120], {}))
+            self.root.after(0, self._dl_done, name, False)
+            return
+        self.root.after(0, self._dl_done, name, True)
+
+    def _dl_paint(self, done, total):
+        pct = (done / total * 100) if total else 0
+        self.dl["value"] = min(100, pct)
+        self.dl_lbl.config(text="%.0f / %.0f MB  (%.0f%%)" % (done, total, pct))
+
+    def _dl_done(self, name, ok):
+        self._dl_show(False)
+        self.model_btn.config(state="normal")
+        self._refresh_models()
+        if ok:
+            threading.Thread(target=self._swap_model, args=(name,),
+                             daemon=True).start()
+
+    def _swap_model(self, name):
+        ok = False
+        try:
+            if self.engine:
+                ok = self.engine.reload_model(name)
+        except Exception as e:
+            self.events.put(("error", "모델을 바꾸지 못했습니다: %s" % str(e)[:120], {}))
+        if ok:
+            self.s["model"] = name
+            core.save_settings(self.s)
+        self.root.after(0, lambda: self.model_btn.config(state="normal"))
+        self.root.after(0, self.pick_model)
 
     def change_hotkey(self, _=None):
         spec = self.hk_var.get().strip().lower() or "win+f9"

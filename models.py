@@ -1,0 +1,236 @@
+# -*- coding: utf-8 -*-
+r"""모델 고르기·내려받기·재활용.
+
+모델은 앱 폴더의 models\<이름>\ 에 한 벌로 받아 두고 계속 쓴다.
+허깅페이스 기본 캐시에 두면 원본과 사용본을 따로 두는데, 윈도우는
+심볼릭 링크를 못 만들어 그대로 복사하므로 디스크가 두 배로 든다.
+local_dir 로 받으면 한 벌만 남는다.
+"""
+import os
+import shutil
+import threading
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(APP_DIR, "models")
+
+# 저장소 이름은 faster_whisper.utils._MODELS 와 같다. turbo 만 다른 곳에 있다.
+# size_mb 는 model.bin 기준 어림값. 실제 값은 받을 때 서버에서 다시 받아온다.
+CATALOG = [
+    {"name": "tiny",           "repo": "Systran/faster-whisper-tiny",
+     "size_mb": 75,   "label": "tiny",           "korean": "나쁨",
+     "note": "아주 빠르지만 한국어를 자주 틀린다"},
+    {"name": "base",           "repo": "Systran/faster-whisper-base",
+     "size_mb": 145,  "label": "base",           "korean": "나쁨",
+     "note": "가볍다. 짧은 말 정도"},
+    {"name": "small",          "repo": "Systran/faster-whisper-small",
+     "size_mb": 484,  "label": "small",          "korean": "보통",
+     "note": "GPU 없이 쓸 만한 마지노선"},
+    {"name": "medium",         "repo": "Systran/faster-whisper-medium",
+     "size_mb": 1530, "label": "medium",         "korean": "좋음",
+     "note": "무난하다"},
+    {"name": "large-v3-turbo", "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+     "size_mb": 1620, "label": "large-v3-turbo", "korean": "매우 좋음",
+     "note": "large-v3 에서 디코더를 줄인 것. 절반 크기에 훨씬 빠르다"},
+    {"name": "large-v3",       "repo": "Systran/faster-whisper-large-v3",
+     "size_mb": 3087, "label": "large-v3",       "korean": "가장 좋음",
+     "note": "가장 정확하지만 무겁다. GPU 가 있어야 대화에 쓸 만하다"},
+]
+BY_NAME = {m["name"]: m for m in CATALOG}
+DEFAULT = "large-v3-turbo"
+
+
+def model_dir(name):
+    return os.path.join(MODELS_DIR, name)
+
+
+def is_installed(name):
+    d = model_dir(name)
+    return os.path.isfile(os.path.join(d, "model.bin"))
+
+
+def installed_size_mb(name):
+    d = model_dir(name)
+    if not os.path.isdir(d):
+        return 0
+    total = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total / 1e6
+
+
+def in_hf_cache(name):
+    """허깅페이스 기본 캐시에 이미 있는지. 있으면 다시 받게 하지 않는다."""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        got = try_to_load_from_cache(BY_NAME[name]["repo"], "model.bin")
+        return isinstance(got, str) and os.path.isfile(got)
+    except Exception:
+        return False
+
+
+def available(name):
+    """쓸 수 있는 상태인지. models 폴더든 허깅페이스 캐시든 상관없다."""
+    return is_installed(name) or in_hf_cache(name)
+
+
+def resolve(name):
+    """엔진에 넘길 값. 받아 둔 게 있으면 그 폴더, 없으면 이름 그대로."""
+    return model_dir(name) if is_installed(name) else name
+
+
+def delete(name):
+    d = model_dir(name)
+    if os.path.isdir(d):
+        shutil.rmtree(d, ignore_errors=True)
+        return True
+    return False
+
+
+WANTED = (".bin", ".json", ".txt", ".md")
+
+
+def remote_size_mb(name):
+    """서버에 물어 실제 받을 크기를 받아온다. 안 되면 어림값."""
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(BY_NAME[name]["repo"], files_metadata=True)
+        total = sum(f.size or 0 for f in info.siblings
+                    if f.rfilename.lower().endswith(WANTED))
+        if total:
+            return total / 1e6
+    except Exception:
+        pass
+    return BY_NAME[name]["size_mb"]
+
+
+def _tqdm_class(report):
+    """허깅페이스가 만드는 진행 표시기를 가로채 바이트 수를 모아 알린다.
+
+    파일을 여러 개 동시에 받으므로 살아 있는 표시기 전부를 더해야 한다.
+    """
+    from tqdm.auto import tqdm as base
+
+    live = []
+    lock = threading.Lock()
+
+    # disable=True 로 만든 tqdm 은 __init__ 을 일찍 끝내서 unit/n/total 같은
+    # 속성이 아예 없다. 그래서 tqdm 내부를 보지 않고 우리가 직접 센다.
+    class Reporting(base):
+        def __init__(self, *a, **kw):
+            self._unit = kw.get("unit", "it")
+            self._total = kw.get("total") or 0
+            self._done = kw.get("initial", 0) or 0
+            kw["disable"] = True                 # 콘솔에는 찍지 않는다
+            super().__init__(*a, **kw)
+            if self._unit == "B":
+                with lock:
+                    live.append(self)
+
+        def update(self, n=1):
+            self._done += (n or 0)
+            self._report()
+            return super().update(n)
+
+        def close(self):
+            self._report()
+            return super().close()
+
+        def _report(self):
+            with lock:
+                done = sum(t._done for t in live)
+                total = sum(t._total for t in live)
+            try:
+                report(done, total)
+            except Exception:
+                pass
+
+    return Reporting
+
+
+def download(name, on_progress=None, on_log=None):
+    r"""모델을 models\<이름>\ 에 받는다. on_progress(받은MB, 전체MB)."""
+    if name not in BY_NAME:
+        raise ValueError("모르는 모델: %s" % name)
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    dest = model_dir(name)
+    log = on_log or (lambda m: None)
+
+    from huggingface_hub import snapshot_download
+
+    # 허깅페이스는 진행 표시기에 total 을 바로 넣어 주지 않는다. 그래서
+    # 전체 크기는 서버에 미리 물어 두고, 진행 표시기에서는 받은 양만 쓴다.
+    total_mb = remote_size_mb(name)
+
+    def report(done_bytes, _unused_total):
+        if on_progress:
+            on_progress(done_bytes / 1e6, total_mb)
+
+    log("%s 내려받기 시작 (%.0f MB)" % (name, total_mb))
+    snapshot_download(
+        repo_id=BY_NAME[name]["repo"],
+        local_dir=dest,
+        # 큰 파일은 여러 형식이 올라와 있는 저장소도 있어 필요한 것만 받는다
+        allow_patterns=["*" + e for e in WANTED],
+        tqdm_class=_tqdm_class(report),
+        max_workers=4,
+    )
+    if not is_installed(name):
+        raise RuntimeError("받았지만 model.bin 이 없습니다: %s" % dest)
+    log("%s 준비 완료 (%.0f MB, %s)" % (name, installed_size_mb(name), dest))
+    return dest
+
+
+def cuda_available():
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
+def free_vram_mb():
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return int(out.stdout.strip().splitlines()[0])
+    except Exception:
+        return 0
+
+
+def recommend():
+    """이 PC 에 맞는 모델 이름과 그 이유."""
+    if not cuda_available():
+        return "small", "GPU 가속을 쓸 수 없어 작은 모델을 권합니다"
+    free = free_vram_mb()
+    if free >= 3000:
+        return "large-v3", "VRAM 여유 %dMB. 가장 정확한 모델을 쓸 수 있습니다" % free
+    if free >= 1500:
+        return "large-v3-turbo", "VRAM 여유 %dMB. 정확도와 무게가 알맞습니다" % free
+    return "small", "VRAM 여유 %dMB 로 빡빡합니다" % free
+
+
+def catalog_rows():
+    """UI 에 뿌릴 줄 목록."""
+    rows = []
+    for m in CATALOG:
+        got = is_installed(m["name"])
+        cached = False if got else in_hf_cache(m["name"])
+        size = installed_size_mb(m["name"]) if got else m["size_mb"]
+        mark = " · 받아둠" if got else (" · 캐시에 있음" if cached else "")
+        rows.append({
+            "name": m["name"],
+            "text": "%s · %s · %.1fGB%s" % (
+                m["label"], m["korean"], size / 1000, mark),
+            "installed": got,
+            "cached": cached,
+            "ready": got or cached,
+            "note": m["note"],
+        })
+    return rows
