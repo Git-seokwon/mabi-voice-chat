@@ -30,10 +30,13 @@ FILES = [
     "src/mabi_voice.pyw",
     "scripts/setup.bat",
     "scripts/setup_gpu.bat",
+    "scripts/uninstall.bat",
+    "scripts/uninstall.ps1",
     "scripts/설치.bat",
     "scripts/콘솔로_실행.bat",
     "scripts/관리자로_실행.bat",
     "scripts/GPU로_바꾸기.bat",
+    "scripts/삭제.bat",
     "tools/voice_chat.py",
     "tools/stt_test.py",
 ]
