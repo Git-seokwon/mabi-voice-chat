@@ -22,6 +22,7 @@ FILES = [
     "docs/images/main.png",
     "docs/images/settings.png",
     "docs/images/overlay.png",
+    "docs/설치가이드.md",
     "requirements.txt",
     "실행.bat",
     "src/core.py",
